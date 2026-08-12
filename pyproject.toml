@@ -13,6 +13,9 @@ dependencies = [
     "python-dotenv>=1.0",
     "pandas-market-calendars>=4.4",
     "pyarrow>=16.0",
+    "python-dateutil>=2.9",
+    "yfinance>=1.5.2",
+    "lxml>=6.1.1",
 ]
 
 [dependency-groups]

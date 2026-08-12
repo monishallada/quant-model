@@ -42,6 +42,7 @@ class ThetaDataConfig(_FrozenModel):
     max_retries: int
     retry_backoff_seconds: float
     reconnect_wait_seconds: float
+    max_concurrent_requests: int
 
 
 class FMPConfig(_FrozenModel):
@@ -63,8 +64,17 @@ class DataConfig(_FrozenModel):
     alpaca: AlpacaConfig
     cache_dir: str
     snapshot_time: str
+    chain_max_dte: int
+    chain_memory_cache_size: int
     risk_free_rate: float
     max_quote_age_seconds: float
+
+
+class CatalystsConfig(_FrozenModel):
+    calendars_dir: str
+    economic_symbols: list[str]
+    earnings_source_backtest: Literal["yfinance", "fmp"]
+    earnings_source_live: Literal["yfinance", "fmp"]
 
 
 class LiquidityConfig(_FrozenModel):
@@ -82,6 +92,9 @@ class ScoreWeights(_FrozenModel):
 class ScreenerConfig(_FrozenModel):
     min_implied_move: float
     liquidity: LiquidityConfig
+    fit_ideal_days: int
+    fit_tolerance_days: int
+    move_score_saturation: float
     score_weights: ScoreWeights
 
 
@@ -148,6 +161,7 @@ class EngineCConfig(_FrozenModel):
 
 class EngineDConfig(_FrozenModel):
     enabled: bool
+    dte_window: tuple[int, int]
     term_structure_ratio_min: float
     per_trade_risk: float
     max_loss_guard_pct: float
@@ -161,6 +175,14 @@ class EnginesConfig(_FrozenModel):
     engine_d: EngineDConfig
 
 
+class HedgeConfig(_FrozenModel):
+    symbol: str
+    put_delta: float
+    dte_window_days: tuple[int, int]
+    min_add_fraction: float
+    check_weekday: int = Field(ge=0, le=4)
+
+
 class RiskConfig(_FrozenModel):
     """Authoritative limits. Frozen; RiskManager is their only interpreter.
 
@@ -170,6 +192,7 @@ class RiskConfig(_FrozenModel):
 
     cash_floor_fraction: float = Field(gt=0.0, lt=1.0)
     hedge_fraction: float = Field(ge=0.0, lt=1.0)
+    hedge: HedgeConfig
     max_deployed: float = Field(gt=0.0, lt=1.0)
     max_correlated_positions: int = Field(ge=1)
     correlation_lookback_days: int
@@ -252,6 +275,7 @@ class Config(_FrozenModel):
     environment: Literal["backtest", "paper", "live"]
     account: AccountConfig
     data: DataConfig
+    catalysts: CatalystsConfig
     watchlist: list[str]
     screener: ScreenerConfig
     signals: SignalsConfig
@@ -296,10 +320,29 @@ def _interpolate_env(node: Any) -> Any:
     return node
 
 
+def _apply_dotted_overrides(tree: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Apply {"engines.engine_a.per_trade_risk": 0.02}-style overrides.
+
+    This is how the parameter sweep varies configs: overrides are applied to
+    the raw dict BEFORE validation, so every swept config passes the same
+    schema (and the same risk-limit bounds) as a hand-written one.
+    """
+    out = dict(tree)
+    for dotted, value in overrides.items():
+        node = out
+        parts = dotted.split(".")
+        for part in parts[:-1]:
+            node[part] = dict(node[part])
+            node = node[part]
+        node[parts[-1]] = value
+    return out
+
+
 def load_config(
     environment: Literal["backtest", "paper", "live"],
     config_dir: str | Path | None = None,
     repo_root: str | Path | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> Config:
     """Load base.yaml + the environment overlay into a validated, frozen Config.
 
@@ -308,6 +351,7 @@ def load_config(
         config_dir: directory holding the YAML files (default: <repo_root>/config).
         repo_root: repository root, used to locate config/ and .env
             (default: two parents above this package's src/ directory).
+        overrides: dotted-path parameter overrides (sweep/walk-forward use).
     """
     root = Path(repo_root) if repo_root else Path(__file__).resolve().parents[3]
     cfg_dir = Path(config_dir) if config_dir else root / "config"
@@ -319,5 +363,8 @@ def load_config(
     with open(cfg_dir / f"{environment}.yaml") as f:
         overlay = yaml.safe_load(f) or {}
 
-    merged = _interpolate_env(_deep_merge(base, overlay))
+    merged = _deep_merge(base, overlay)
+    if overrides:
+        merged = _apply_dotted_overrides(merged, overrides)
+    merged = _interpolate_env(merged)
     return Config.model_validate(merged)

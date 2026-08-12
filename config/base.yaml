@@ -19,6 +19,7 @@ data:
     max_retries: 5
     retry_backoff_seconds: 2.0           # exponential backoff base
     reconnect_wait_seconds: 15           # wait for terminal to come back up
+    max_concurrent_requests: 4           # terminal caps concurrency at 4 on this tier
   fmp:
     base_url: "https://financialmodelingprep.com"
     api_key: "${FMP_API_KEY}"
@@ -30,8 +31,16 @@ data:
     secret_key: "${ALPACA_SECRET_KEY}"
   cache_dir: "data_cache"
   snapshot_time: "15:45"                 # ET quote snapshot used by the daily backtest loop
+  chain_max_dte: 75                      # chain snapshots include expirations up to this many calendar days out
+  chain_memory_cache_size: 8192          # assembled-chain LRU entries (speeds up parameter sweeps)
   risk_free_rate: 0.045                  # Black-Scholes fallback rate (annualized)
   max_quote_age_seconds: 10              # live: skip entry if quote staler than this
+
+catalysts:
+  calendars_dir: "config/calendars"      # static CPI/FOMC schedules (BLS + Fed published)
+  economic_symbols: [SPY, QQQ, IWM]      # macro events are traded via these index products
+  earnings_source_backtest: "yfinance"   # FMP plan is forward-only; yfinance covers history
+  earnings_source_live: "fmp"
 
 watchlist:                               # config-editable catalyst universe
   - SPY
@@ -51,6 +60,9 @@ screener:
     max_spread_pct_of_mid: 0.08          # bid/ask spread <= 8% of mid
     min_option_volume: 500
     min_open_interest: 1000
+  fit_ideal_days: 7                      # days-to-catalyst sweet spot for ranking
+  fit_tolerance_days: 7                  # fit decays linearly to 0 this many days away
+  move_score_saturation: 3.0             # move score saturates at this multiple of min_implied_move
   score_weights:                         # ranking = weighted product/sum of normalized factors
     liquidity: 1.0
     implied_move: 1.0
@@ -107,6 +119,7 @@ engines:
     use_stops: true
   engine_d:                              # Event term-structure calendar (ADVANCED, neutral)
     enabled: false                       # validated only after A-C prove out
+    dte_window: [1, 5]                   # evaluate when catalyst is 1-5 trading days out
     term_structure_ratio_min: 1.15       # front-month IV / back-month IV trigger
     per_trade_risk: 0.02
     max_loss_guard_pct: 0.50             # close if calendar loses this much of debit
@@ -119,6 +132,12 @@ engines:
 risk:
   cash_floor_fraction: 0.40              # NEVER deployed; hard survival guarantee
   hedge_fraction: 0.10                   # index-put hedge sleeve (drawdown reducer)
+  hedge:
+    symbol: "SPY"                        # hedge instrument (index puts)
+    put_delta: 0.25
+    dte_window_days: [45, 100]           # buy puts with expiry in this window
+    min_add_fraction: 0.25               # only add when budget gap >= this fraction of target
+    check_weekday: 0                     # evaluate hedge Mondays (0=Mon) + when sleeve is empty
   max_deployed: 0.25                     # portfolio heat: total premium at risk cap
   max_correlated_positions: 3            # per correlation group
   correlation_lookback_days: 60
