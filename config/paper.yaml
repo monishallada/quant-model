@@ -1,0 +1,6 @@
+# Alpaca paper-trading overlay — merged on top of base.yaml.
+environment: paper
+
+execution:
+  commissions:
+    active_profile: "alpaca"

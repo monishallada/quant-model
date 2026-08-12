@@ -1,0 +1,6 @@
+# Backtest environment overlay — merged on top of base.yaml.
+environment: backtest
+
+execution:
+  commissions:
+    active_profile: "alpaca"

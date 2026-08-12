@@ -1,0 +1,27 @@
+# Secrets — never commit
+.env
+*.pem
+tokens/
+
+# Data cache (large, regenerable)
+data_cache/
+*.parquet
+
+# ThetaData terminal (jar + runtime config are regenerable via scripts/run_thetadata.sh)
+thetadata/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+
+# Backtest outputs
+results/
+
+# OS
+.DS_Store

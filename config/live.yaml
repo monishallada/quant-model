@@ -1,0 +1,7 @@
+# Live trading overlay — merged on top of base.yaml.
+# Post-validation this becomes the Schwab profile (SchwabBroker + schwab commissions).
+environment: live
+
+execution:
+  commissions:
+    active_profile: "schwab"

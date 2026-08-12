@@ -1,0 +1,180 @@
+# =============================================================================
+# Catalyst trading system — master parameter file.
+# EVERY numeric parameter in the system lives here (or in an environment
+# overlay). Code contains no hardcoded numbers. Every value below is a
+# STARTING POINT that the parameter sweep (backtest.sweep) is meant to
+# optimize — except the risk section, whose limits are authoritative and
+# are never relaxed by any optimizer or module.
+# Secrets are referenced as ${ENV_VAR} and resolved from .env at load time.
+# =============================================================================
+
+account:
+  starting_capital: 100000.0        # backtest starting equity (USD)
+
+data:
+  thetadata:
+    base_url: "http://127.0.0.1:25503"   # Theta Terminal v3 local gateway
+    api_key: "${THETADATA_API_KEY}"      # used by terminal launcher, not HTTP calls
+    request_timeout_seconds: 60
+    max_retries: 5
+    retry_backoff_seconds: 2.0           # exponential backoff base
+    reconnect_wait_seconds: 15           # wait for terminal to come back up
+  fmp:
+    base_url: "https://financialmodelingprep.com"
+    api_key: "${FMP_API_KEY}"
+    request_timeout_seconds: 30
+    max_retries: 3
+  alpaca:
+    endpoint: "${ALPACA_ENDPOINT}"
+    api_key: "${ALPACA_API_KEY}"
+    secret_key: "${ALPACA_SECRET_KEY}"
+  cache_dir: "data_cache"
+  snapshot_time: "15:45"                 # ET quote snapshot used by the daily backtest loop
+  risk_free_rate: 0.045                  # Black-Scholes fallback rate (annualized)
+  max_quote_age_seconds: 10              # live: skip entry if quote staler than this
+
+watchlist:                               # config-editable catalyst universe
+  - SPY
+  - QQQ
+  - IWM
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - META
+  - TSLA
+  - GOOGL
+
+screener:
+  min_implied_move: 0.03                 # require ATM-straddle implied move >= 3%
+  liquidity:
+    max_spread_pct_of_mid: 0.08          # bid/ask spread <= 8% of mid
+    min_option_volume: 500
+    min_open_interest: 1000
+  score_weights:                         # ranking = weighted product/sum of normalized factors
+    liquidity: 1.0
+    implied_move: 1.0
+    days_to_catalyst_fit: 1.0
+
+signals:
+  trend:
+    fast_lookback: 20                    # price vs moving averages
+    slow_lookback: 50
+    min_confidence: 0.0
+  mean_reversion:
+    rsi_period: 14
+    rsi_oversold: 30.0
+    rsi_overbought: 70.0
+    zscore_window: 20
+    zscore_threshold: 2.0
+
+engines:
+  engine_a:                              # Pre-catalyst convexity (DRIVER)
+    enabled: true
+    dte_window: [5, 10]                  # catalyst this many trading days out
+    iv_rank_max: 30.0                    # only buy cheap optionality
+    iv_rank_lookback_days: 252
+    target_delta: 0.30
+    delta_range: [0.25, 0.35]
+    catalyst_life_fraction: [0.33, 0.50] # catalyst falls in this fraction of option life
+    per_trade_risk: 0.03                 # % of equity as premium (= max loss)
+    tp1_gain: 1.00                       # sell tp1_fraction at +100%
+    tp1_fraction: 0.50
+    trail_stop_pct: 0.30                 # trailing stop on remainder after tp1
+    hold_through_catalyst: false         # exit day before catalyst by default (avoid crush)
+    use_stops: true                      # backtest tests stops-on vs stops-off
+  engine_b:                              # Crush-resistant debit spread (STABILIZER)
+    enabled: true
+    dte_window: [1, 3]
+    long_delta: 0.40
+    short_delta: 0.20
+    per_trade_risk: 0.03                 # % of equity as net debit
+    tp_fraction_of_max: 0.60             # take profit at 60% of max spread value
+    use_stops: true
+  engine_c:                              # Post-earnings drift (ANOMALY)
+    enabled: true
+    entry_window_days: [0, 2]            # trading days AFTER the earnings report
+    min_surprise_pct: 0.05               # |actual - consensus| / |consensus| >= 5%
+    iv_rank_max: 50.0                    # require IV normalized post-crush
+    structure: "debit_spread"            # debit_spread | long_option
+    long_delta: 0.40                     # spread deltas when structure = debit_spread
+    short_delta: 0.20
+    single_leg_delta: 0.35               # when structure = long_option
+    expiry_weeks: [2, 4]
+    per_trade_risk: 0.02
+    hold_days: 7                         # drift window (sweep 5-10)
+    trail_stop_pct: 0.25
+    use_stops: true
+  engine_d:                              # Event term-structure calendar (ADVANCED, neutral)
+    enabled: false                       # validated only after A-C prove out
+    term_structure_ratio_min: 1.15       # front-month IV / back-month IV trigger
+    per_trade_risk: 0.02
+    max_loss_guard_pct: 0.50             # close if calendar loses this much of debit
+    use_stops: true
+
+# ---------------------------------------------------------------------------
+# RISK — authoritative. These limits are enforced by RiskManager on every
+# order and are never relaxed by any module, optimizer, or sweep result.
+# ---------------------------------------------------------------------------
+risk:
+  cash_floor_fraction: 0.40              # NEVER deployed; hard survival guarantee
+  hedge_fraction: 0.10                   # index-put hedge sleeve (drawdown reducer)
+  max_deployed: 0.25                     # portfolio heat: total premium at risk cap
+  max_correlated_positions: 3            # per correlation group
+  correlation_lookback_days: 60
+  correlation_threshold: 0.70            # underlyings above this are one group
+  daily_loss_halt: -0.08                 # circuit breaker: halt new entries for the day
+  weekly_loss_halt: -0.15                # circuit breaker: halt new entries for the week
+  stop_loss_pct: -0.50                   # soft stop, % of premium (per-engine use_stops)
+  close_before_expiry_days: 1            # avoid assignment/pin risk
+  time_stop_after_catalyst_days: 1       # mandatory close after catalyst resolves (A/B/C)
+
+execution:
+  fill_model:                            # backtest fill assumptions (conservative)
+    spread_fill_fraction: 0.60           # pay 60% toward ask on buys / toward bid on sells
+    slippage_pct_of_premium: 0.02
+  commissions:
+    alpaca_per_contract: 0.00
+    schwab_per_contract_per_leg: 0.65
+    active_profile: "alpaca"             # which commission profile the backtest charges
+  limit_price_offset: "mid"              # live limit orders: "mid" or ticks toward fill side
+  limit_ticks_toward_fill: 1
+  max_order_retries: 3
+  retry_reprice_ticks: 1                 # move limit this many ticks toward fill per retry
+  order_poll_seconds: 5
+  unfilled_cancel_seconds: 120
+
+backtest:
+  start_date: "2018-01-01"               # ~8 years of ThetaData history
+  end_date: "2026-08-01"
+  train_test_split: 0.70                 # chronological
+  walk_forward:
+    train_months: 24
+    test_months: 6
+    step_months: 6
+  monte_carlo:
+    n_paths: 2000
+    ruin_threshold_fraction: 0.50        # "ruin" = equity below 50% of start
+    resample_block_size: 20              # block bootstrap of trade sequence
+  sweep:                                 # parameter grid/random search space
+    mode: "grid"                         # grid | random
+    random_samples: 200
+    parameters:
+      engine_a.per_trade_risk: [0.02, 0.03, 0.05]
+      engine_b.per_trade_risk: [0.02, 0.03, 0.05]
+      engine_a.target_delta: [0.25, 0.30, 0.35]
+      engine_a.dte_window: [[5, 10], [7, 12]]
+      engine_b.tp_fraction_of_max: [0.50, 0.60, 0.75]
+      risk.max_deployed: [0.15, 0.25, 0.35]
+      risk.cash_floor_fraction: [0.30, 0.40, 0.50]
+      risk.stop_loss_pct: [-0.50, -1.00]   # -1.00 = stops effectively off
+      engine_a.use_stops: [true, false]
+      engine_b.use_stops: [true, false]
+
+observability:
+  log_dir: "logs"
+  log_level: "INFO"
+  heartbeat_seconds: 60
+  stale_data_alert_seconds: 300
+  kill_switch_file: "KILL_SWITCH"        # main loop halts new entries if this file exists
+  kill_switch_flatten: false             # if true, also flatten open positions on kill
