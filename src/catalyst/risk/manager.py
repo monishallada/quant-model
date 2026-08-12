@@ -137,13 +137,20 @@ class RiskManager:
         if proposal.unit_max_loss <= 0 or proposal.unit_cost <= 0:
             return GateDecision(0, "non-positive unit cost/max-loss")
 
+        # Size against worst-case entry cost plus the configured slippage
+        # buffer so the risk budget is a HARD bound: actual fills can be worse
+        # than mid, and sizing must never let that breach the budget.
+        buffered_risk = (
+            max(proposal.unit_max_loss, proposal.unit_cost) * (1.0 + cfg.sizing_cost_buffer)
+        )
+
         # 2. Fixed-fractional base size.
-        units = fixed_fractional_units(equity, proposal.per_trade_risk_fraction, proposal.unit_max_loss)
+        units = fixed_fractional_units(equity, proposal.per_trade_risk_fraction, buffered_risk)
         if units <= 0:
             return GateDecision(0, "risk budget below one unit")
 
-        unit_cost_dollars = proposal.unit_cost * 100.0
-        unit_risk_dollars = proposal.unit_max_loss * 100.0
+        unit_cost_dollars = buffered_risk * 100.0
+        unit_risk_dollars = buffered_risk * 100.0
 
         # 3. Cash floor: cash after paying the debit stays above the floor.
         floor = cfg.cash_floor_fraction * equity

@@ -121,7 +121,7 @@ class EngineAConvexity(Strategy):
             catalyst_ref=catalyst.ref,
             legs=[OrderLeg(key=pick.key, side=Side.BUY, qty=1)],
             unit_cost=pick.mid,
-            unit_max_loss=pick.mid,
+            unit_max_loss=pick.ask,  # worst-case NBBO entry = true max loss basis
             direction=signal.direction,
             exit_rules=ExitRules(
                 tp1_gain=cfg.tp1_gain,

@@ -15,7 +15,7 @@ data:
   thetadata:
     base_url: "http://127.0.0.1:25503"   # Theta Terminal v3 local gateway
     api_key: "${THETADATA_API_KEY}"      # used by terminal launcher, not HTTP calls
-    request_timeout_seconds: 60
+    request_timeout_seconds: 180           # bulk greeks-EOD pulls can exceed 60s under load
     max_retries: 5
     retry_backoff_seconds: 2.0           # exponential backoff base
     reconnect_wait_seconds: 15           # wait for terminal to come back up
@@ -131,6 +131,7 @@ engines:
 # ---------------------------------------------------------------------------
 risk:
   cash_floor_fraction: 0.40              # NEVER deployed; hard survival guarantee
+  sizing_cost_buffer: 0.05               # size as if fills cost this much beyond worst NBBO
   hedge_fraction: 0.10                   # index-put hedge sleeve (drawdown reducer)
   hedge:
     symbol: "SPY"                        # hedge instrument (index puts)

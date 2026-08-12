@@ -64,7 +64,9 @@ def open_position(premium: float, engine: str = "engine_a", symbol: str = "SPY")
 def test_basic_sizing_matches_fixed_fractional() -> None:
     rm = RiskManager(CFG.risk)
     decision = rm.size_entry(proposal(unit_cost=3.0, risk_fraction=0.03), account(), [])
-    assert decision.units == 10  # 3000 budget / 300 per unit
+    # 3000 budget / (300 x 1.05 sizing_cost_buffer) = 9.52 -> 9 units.
+    # The buffer keeps the risk budget a hard bound under worse-than-mid fills.
+    assert decision.units == 9
 
 
 def test_cash_floor_rejects_and_trims() -> None:

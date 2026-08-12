@@ -103,7 +103,8 @@ class EngineDCalendar(Strategy):
             if ratio < cfg.term_structure_ratio_min:
                 continue
             net_debit = back.mid - front.mid
-            if net_debit <= 0:
+            worst_debit = back.ask - front.bid  # worst-case NBBO entry
+            if net_debit <= 0 or worst_debit <= 0:
                 continue
             combined_spread = front.spread_pct_of_mid + back.spread_pct_of_mid
             entry = (
@@ -111,6 +112,7 @@ class EngineDCalendar(Strategy):
                 OrderLeg(key=front.key, side=Side.SELL, qty=1),
                 OrderLeg(key=back.key, side=Side.BUY, qty=1),
                 net_debit,
+                worst_debit,
                 ratio,
                 front.key.strike,
             )
@@ -118,7 +120,7 @@ class EngineDCalendar(Strategy):
                 best = entry
         if best is None:
             return None
-        _, short_leg, long_leg, net_debit, ratio, strike = best
+        _, short_leg, long_leg, net_debit, worst_debit, ratio, strike = best
 
         reaction = resolve_reaction_session(catalyst)
         hard_exit = add_trading_days(reaction, self._risk.time_stop_after_catalyst_days)
@@ -127,7 +129,7 @@ class EngineDCalendar(Strategy):
             catalyst_ref=catalyst.ref,
             legs=[short_leg, long_leg],
             unit_cost=net_debit,
-            unit_max_loss=net_debit,
+            unit_max_loss=worst_debit,
             direction=Direction.NEUTRAL,
             exit_rules=ExitRules(
                 # Max-loss guard on large moves: always armed for calendars.

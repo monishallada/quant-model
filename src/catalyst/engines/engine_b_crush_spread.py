@@ -81,10 +81,11 @@ class EngineBCrushSpread(Strategy):
             return None
 
         net_debit = long_leg.mid - short_leg.mid
+        worst_debit = long_leg.ask - short_leg.bid  # worst-case NBBO entry
         width = abs(long_leg.key.strike - short_leg.key.strike)
-        # Degenerate spreads: no debit means quotes are crossed/absurd; debit
-        # at/above width can never profit after costs.
-        if net_debit <= 0 or net_debit >= width:
+        # Degenerate spreads: no debit means quotes are crossed/absurd; a
+        # worst-case debit at/above width can never profit after costs.
+        if net_debit <= 0 or worst_debit >= width:
             return None
 
         hard_exit = add_trading_days(reaction, self._risk.time_stop_after_catalyst_days)
@@ -96,7 +97,7 @@ class EngineBCrushSpread(Strategy):
                 OrderLeg(key=short_leg.key, side=Side.SELL, qty=1),
             ],
             unit_cost=net_debit,
-            unit_max_loss=net_debit,
+            unit_max_loss=worst_debit,
             direction=signal.direction,
             exit_rules=ExitRules(
                 tp_fraction_of_max=cfg.tp_fraction_of_max,

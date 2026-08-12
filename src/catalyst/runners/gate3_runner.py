@@ -35,6 +35,7 @@ from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
 from catalyst.risk.hedge import HedgeManager
 from catalyst.risk.manager import RiskManager
+from catalyst.screener.catalyst_screener import CatalystScreener
 from catalyst.runners.backtest_runner import format_result
 from catalyst.runners.gate2_runner import build_engine, build_signal, load_catalysts
 
@@ -91,6 +92,7 @@ def run_one(
         catalysts=catalysts,
         gate=RiskManager(cfg.risk),
         hedger=HedgeManager(cfg.risk),
+        screener=CatalystScreener(cfg.screener),
         label=label,
     )
     result = bt.run(start, end)

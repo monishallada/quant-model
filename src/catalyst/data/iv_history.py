@@ -21,7 +21,7 @@ import pandas as pd
 
 from catalyst.core.config import DataConfig
 from catalyst.data.cache import ParquetCache
-from catalyst.data.thetadata_client import ThetaDataClient
+from catalyst.data.thetadata_client import ThetaDataClient, ThetaDataError
 
 logger = logging.getLogger(__name__)
 
@@ -78,13 +78,16 @@ class IVRankProvider:
         cached = self._cache.get("iv_eod", key)
         if cached is not None:
             return cached
+        # Request exactly the DTE window the series consumes — these bulk
+        # pulls are the heaviest queries the terminal serves; payload size
+        # directly drives timeout risk on long warmup jobs.
         df = self._client.get_dataframe(
             "/v3/option/history/greeks/eod",
             {
                 "symbol": symbol,
                 "expiration": f"{expiry:%Y%m%d}",
-                "start_date": f"{expiry - timedelta(days=70):%Y%m%d}",
-                "end_date": f"{expiry - timedelta(days=_DTE_MIN - 6):%Y%m%d}",
+                "start_date": f"{expiry - timedelta(days=_DTE_MAX):%Y%m%d}",
+                "end_date": f"{expiry - timedelta(days=_DTE_MIN):%Y%m%d}",
                 "strike_range": _STRIKE_RANGE,
             },
         )
@@ -100,22 +103,29 @@ class IVRankProvider:
             return s
 
         monthlies = self._monthly_expirations(symbol, start, end + timedelta(days=45))
-        # Warm uncached expiry frames concurrently (terminal allows a few
-        # parallel requests); assembly below then reads from cache.
+        # Warm uncached expiry frames with LOW concurrency: these are the
+        # heaviest queries the terminal serves, and sustained full-width
+        # parallelism degrades its latency until requests time out.
         missing = [e for e in monthlies if not self._cache.exists("iv_eod", f"{symbol}_{e:%Y%m%d}")]
         if len(missing) > 1:
-            workers = max(1, self._cfg.thetadata.max_concurrent_requests)
+            workers = max(1, self._cfg.thetadata.max_concurrent_requests // 2)
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 futures = [pool.submit(self._expiry_frame, symbol, e) for e in missing]
                 for f in as_completed(futures):
                     try:
                         f.result()
-                    except Exception as exc:  # noqa: BLE001 — serial path re-raises
-                        logger.debug("IV prefetch failed (will retry serially): %s", exc)
+                    except Exception as exc:  # noqa: BLE001 — serial path handles it
+                        logger.debug("IV prefetch failed: %s", exc)
 
         rows: dict[date, tuple[int, float]] = {}  # day -> (|dte-30|, iv)
         for expiry in monthlies:
-            df = self._expiry_frame(symbol, expiry)
+            try:
+                df = self._expiry_frame(symbol, expiry)
+            except ThetaDataError as exc:
+                # One unfetchable month costs the IV series ~1 sample window;
+                # aborting a multi-hour warmup job costs everything.
+                logger.warning("Skipping IV month %s %s: %s", symbol, expiry, exc)
+                continue
             if df.empty:
                 continue
             df = df.assign(day=pd.to_datetime(df["timestamp"]).dt.date)

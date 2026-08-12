@@ -108,7 +108,7 @@ class EngineCPead(Strategy):
             if pick is None or pick.mid <= 0:
                 return None
             legs = [OrderLeg(key=pick.key, side=Side.BUY, qty=1)]
-            unit_cost = unit_max_loss = pick.mid
+            unit_cost, unit_max_loss = pick.mid, pick.ask
             rationale_legs = {"picked_delta": pick.greeks.delta if pick.greeks else None}
         else:
             long_leg = nearest_delta(chain, expiry, right, cfg.long_delta)
@@ -118,14 +118,15 @@ class EngineCPead(Strategy):
             if long_leg.key.strike == short_leg.key.strike:
                 return None
             net_debit = long_leg.mid - short_leg.mid
+            worst_debit = long_leg.ask - short_leg.bid
             width = abs(long_leg.key.strike - short_leg.key.strike)
-            if net_debit <= 0 or net_debit >= width:
+            if net_debit <= 0 or worst_debit >= width:
                 return None
             legs = [
                 OrderLeg(key=long_leg.key, side=Side.BUY, qty=1),
                 OrderLeg(key=short_leg.key, side=Side.SELL, qty=1),
             ]
-            unit_cost = unit_max_loss = net_debit
+            unit_cost, unit_max_loss = net_debit, worst_debit
             rationale_legs = {
                 "long_delta": long_leg.greeks.delta if long_leg.greeks else None,
                 "short_delta": short_leg.greeks.delta if short_leg.greeks else None,

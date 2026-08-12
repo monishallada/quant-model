@@ -105,7 +105,7 @@ class HedgeManager:
             catalyst_ref="hedge-sleeve",
             legs=[OrderLeg(key=put.key, side=Side.BUY, qty=1)],
             unit_cost=put.mid,
-            unit_max_loss=put.mid,
+            unit_max_loss=put.ask,
             direction=Direction.SHORT,  # offsets net-long driver exposure
             exit_rules=ExitRules(
                 use_stops=False,  # hedges ride; they exist for the tail

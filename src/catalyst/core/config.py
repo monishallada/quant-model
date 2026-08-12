@@ -191,6 +191,7 @@ class RiskConfig(_FrozenModel):
     """
 
     cash_floor_fraction: float = Field(gt=0.0, lt=1.0)
+    sizing_cost_buffer: float = Field(ge=0.0, le=0.5)
     hedge_fraction: float = Field(ge=0.0, lt=1.0)
     hedge: HedgeConfig
     max_deployed: float = Field(gt=0.0, lt=1.0)

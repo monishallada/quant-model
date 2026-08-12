@@ -42,6 +42,7 @@ from catalyst.core.tradingcal import sessions_in_range
 from catalyst.backtest import metrics as m
 from catalyst.backtest.montecarlo import probability_of_ruin
 from catalyst.brokers.simulated import SimulatedBroker
+from catalyst.data.catalysts import resolve_reaction_session
 from catalyst.data.thetadata_historical import DataUnavailableError
 from catalyst.exits.manager import evaluate_exits
 from catalyst.risk.gate import EntryGate
@@ -80,6 +81,7 @@ class Backtester:
         catalysts: Sequence[Catalyst],
         gate: EntryGate,
         hedger: object | None = None,  # HedgeManager (M3); None = no hedge sleeve
+        screener: object | None = None,  # CatalystScreener; gates PRE-event entries
         label: str = "backtest",
     ) -> None:
         self._cfg = cfg
@@ -89,6 +91,7 @@ class Backtester:
         self._catalysts = list(catalysts)
         self._gate = gate
         self._hedger = hedger
+        self._screener = screener
         self._label = label
         hh, mm = cfg.data.snapshot_time.split(":")
         self._snap = time(int(hh), int(mm))
@@ -128,7 +131,11 @@ class Backtester:
         trades: list[TradeRecord] = []
         equity_curve: dict[date, float] = {}
 
-        for session in sessions:
+        for i, session in enumerate(sessions):
+            if i % 100 == 0:
+                logger.info(
+                    "progress %s: session %d/%d (%s)", self._label, i + 1, len(sessions), session
+                )
             at = datetime.combine(session, self._snap)
             chains = self._pull_chains(session, at, broker, catalysts_by_symbol)
             broker.update_market(chains, at)
@@ -188,6 +195,17 @@ class Backtester:
                 continue
             available = [e for e in self._data.list_expirations(sym) if e > session]
             for catalyst in in_play:
+                # The screener measures implied move on the first expiry that
+                # captures the event — make sure it's in the snapshot.
+                if self._screener is not None and catalyst.when.date() > session:
+                    event_expiries = [
+                        e for e in available if e >= resolve_reaction_session(catalyst)
+                    ]
+                    if event_expiries and any(
+                        strat.required_expiries(catalyst, available, session)
+                        for strat in self._strategies
+                    ):
+                        needed[sym].add(event_expiries[0])
                 for strat in self._strategies:
                     req = strat.required_expiries(catalyst, available, session)
                     if req is None:
@@ -387,6 +405,8 @@ class Backtester:
                 continue
             signal = self._signal_for(sym, history, session, chain)
             for catalyst in in_play:
+                if not self._passes_screener(catalyst, chain, at):
+                    continue
                 for strat in self._strategies:
                     if (strat.name, catalyst.ref) in already:
                         continue
@@ -395,6 +415,21 @@ class Backtester:
                         continue
                     self._enter(broker, proposal, open_state, at)
                     already.add((strat.name, catalyst.ref))
+
+    def _passes_screener(self, catalyst: Catalyst, chain: OptionChain, at: datetime) -> bool:
+        """Screener gates PRE-event entries (implied move + liquidity). Post-
+        event evaluation (Engine C's PEAD window) bypasses it: post-crush
+        straddles can't measure the event's implied move, and C carries its
+        own surprise/IV gates."""
+        if self._screener is None or catalyst.when <= at:
+            return True
+        row = self._screener.screen(catalyst, chain, at)  # type: ignore[attr-defined]
+        if row is None:
+            return False
+        if row.rejected:
+            logger.debug("Screener rejected %s: %s", catalyst.ref, row.rejected)
+            return False
+        return True
 
     def _signal_for(
         self,

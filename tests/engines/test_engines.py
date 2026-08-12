@@ -55,7 +55,8 @@ def test_engine_a_proposes_otm_call_on_long() -> None:
     assert leg_key.strike > 100.0  # slightly OTM
     picked = chain.find(leg_key)
     assert 0.25 <= abs(picked.greeks.delta) <= 0.35
-    assert trade.unit_max_loss == trade.unit_cost > 0
+    # Max-loss basis is worst-case NBBO (ask), at or above the mid estimate.
+    assert trade.unit_max_loss >= trade.unit_cost > 0
     # Default: out the session before the event (2024-06-12 event, AMC ->
     # reaction 06-13, so hard exit 06-12... reaction-1 trading day).
     assert trade.exit_rules.hard_exit_date is not None
