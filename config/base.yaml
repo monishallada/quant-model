@@ -179,17 +179,17 @@ backtest:
   sweep:                                 # parameter grid/random search space
     mode: "grid"                         # grid | random
     random_samples: 200
+    # Gate 3 focused grid: the decision-relevant axes given Gate 2 findings
+    # (engine enablement, Engine C sizing, stops on/off per engine). Structure
+    # params (deltas/DTE) for engines whose signal shows no edge are NOT swept
+    # — optimizing structure on an edgeless signal is overfitting bait; they
+    # return to the grid when a signal with demonstrated edge exists.
     parameters:
-      engine_a.per_trade_risk: [0.02, 0.03, 0.05]
-      engine_b.per_trade_risk: [0.02, 0.03, 0.05]
-      engine_a.target_delta: [0.25, 0.30, 0.35]
-      engine_a.dte_window: [[5, 10], [7, 12]]
-      engine_b.tp_fraction_of_max: [0.50, 0.60, 0.75]
-      risk.max_deployed: [0.15, 0.25, 0.35]
-      risk.cash_floor_fraction: [0.30, 0.40, 0.50]
-      risk.stop_loss_pct: [-0.50, -1.00]   # -1.00 = stops effectively off
-      engine_a.use_stops: [true, false]
-      engine_b.use_stops: [true, false]
+      engines.engine_a.enabled: [true, false]
+      engines.engine_b.enabled: [true, false]
+      engines.engine_c.per_trade_risk: [0.02, 0.03]
+      engines.engine_c.use_stops: [true, false]
+      engines.engine_c.hold_days: [5, 7, 10]
 
 observability:
   log_dir: "logs"

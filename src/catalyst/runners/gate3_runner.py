@@ -23,6 +23,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from catalyst.core.config import Config, load_config
 from catalyst.core.models import BacktestResult
 from catalyst.backtest.backtester import Backtester
@@ -108,13 +110,23 @@ def main() -> None:
     parser.add_argument("--start", type=date.fromisoformat, default=None)
     parser.add_argument("--end", type=date.fromisoformat, default=None)
     parser.add_argument("--out", type=Path, default=Path("results/gate3"))
+    parser.add_argument(
+        "--set", action="append", default=[], metavar="KEY=VALUE",
+        help="dotted config override applied to every run in this invocation "
+             "(e.g. --set engines.engine_b.enabled=false)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    base_cfg = load_config("backtest")
+    base_overrides: dict[str, Any] = {}
+    for item in args.set:
+        key, _, raw = item.partition("=")
+        base_overrides[key] = yaml.safe_load(raw)  # "false"->False, "0.02"->float
+
+    base_cfg = load_config("backtest", overrides=base_overrides or None)
     start = args.start or date.fromisoformat(base_cfg.backtest.start_date)
     end = args.end or date.fromisoformat(base_cfg.backtest.end_date)
     boundary, _ = chronological_split(start, end, base_cfg.backtest.train_test_split)
@@ -137,7 +149,7 @@ def main() -> None:
     elif args.mode == "sweep":
         rows = []
         for i, overrides in enumerate(iter_combinations(base_cfg.backtest.sweep)):
-            cfg = load_config("backtest", overrides=overrides)
+            cfg = load_config("backtest", overrides={**base_overrides, **overrides})
             label = f"sweep-{i}"
             train_res = run_one(assembly, cfg, args.signal, start, boundary,
                                 f"{label}-train", overrides)
@@ -168,7 +180,7 @@ def main() -> None:
                     "engines.engine_c.per_trade_risk": max(size * 2 / 3, 0.01),
                     "risk.cash_floor_fraction": floor,
                 }
-                cfg = load_config("backtest", overrides=overrides)
+                cfg = load_config("backtest", overrides={**base_overrides, **overrides})
                 res = run_one(assembly, cfg, args.signal, start, end,
                               f"dial-{size}-{floor}", overrides)
                 rows.append({

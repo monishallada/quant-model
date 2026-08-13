@@ -201,27 +201,46 @@ class ThetaDataHistorical(DataSource):
             # One row per contract at the snapshot (dedupe defensively).
             g = g.drop_duplicates(subset=["strike", "right"], keep="first")
 
+            # Column-array assembly: this path runs thousands of times per
+            # backtest and row-wise iteration dominated cache-hot run time.
             eod = self._eod_frame(symbol, expiry, day)
             vol_map: dict[tuple[float, str], int] = {}
             if not eod.empty:
-                for _, r in eod.iterrows():
-                    vol_map[(float(r["strike"]), str(r["right"]))] = int(r["volume"])
+                vol_map = {
+                    (float(k), str(r)): int(v)
+                    for k, r, v in zip(eod["strike"], eod["right"], eod["volume"])
+                }
 
             oi = self._oi_frame(symbol, expiry, day)
             oi_map: dict[tuple[float, str], int] = {}
             if not oi.empty:
-                for _, r in oi.iterrows():
-                    oi_map[(float(r["strike"]), str(r["right"]))] = int(r["open_interest"])
+                oi_map = {
+                    (float(k), str(r)): int(v)
+                    for k, r, v in zip(oi["strike"], oi["right"], oi["open_interest"])
+                }
 
-            for _, row in g.iterrows():
-                strike = float(row["strike"])
-                right_s = str(row["right"])
-                bid = float(row["bid"]) if not pd.isna(row["bid"]) else 0.0
-                ask = float(row["ask"]) if not pd.isna(row["ask"]) else 0.0
-                upx = float(row["underlying_price"])
+            timestamps = pd.to_datetime(g["timestamp"]).dt.to_pydatetime()
+            rows = zip(
+                g["strike"].to_numpy(dtype=float),
+                g["right"].astype(str).to_numpy(),
+                g["bid"].to_numpy(dtype=float),
+                g["ask"].to_numpy(dtype=float),
+                g["underlying_price"].to_numpy(dtype=float),
+                g["delta"].to_numpy(dtype=float),
+                g["theta"].to_numpy(dtype=float),
+                g["vega"].to_numpy(dtype=float),
+                g["rho"].to_numpy(dtype=float),
+                g["implied_vol"].to_numpy(dtype=float),
+                timestamps,
+            )
+            for strike, right_s, bid, ask, upx, delta, theta, vega, rho, iv, ts in rows:
+                bid = bid if bid == bid else 0.0  # NaN-safe without pd.isna calls
+                ask = ask if ask == ask else 0.0
                 if upx > 0:
                     underlying_prices.append(upx)
-                greeks = self._row_greeks(row, strike, right_s, upx, day, expiry, bid, ask)
+                greeks = self._scalar_greeks(
+                    delta, theta, vega, rho, iv, strike, right_s, upx, day, expiry, bid, ask
+                )
                 contracts.append(
                     OptionContract(
                         key=OptionKey(
@@ -235,7 +254,7 @@ class ThetaDataHistorical(DataSource):
                         volume=vol_map.get((strike, right_s), 0),
                         open_interest=oi_map.get((strike, right_s), 0),
                         greeks=greeks,
-                        quote_timestamp=pd.to_datetime(row["timestamp"]).to_pydatetime(),
+                        quote_timestamp=ts,
                     )
                 )
 
@@ -254,9 +273,13 @@ class ThetaDataHistorical(DataSource):
             self._chain_memo.popitem(last=False)
         return chain
 
-    def _row_greeks(
+    def _scalar_greeks(
         self,
-        row: pd.Series,
+        delta: float,
+        theta: float,
+        vega: float,
+        rho: float,
+        iv: float,
         strike: float,
         right_s: str,
         underlying_price: float,
@@ -265,15 +288,13 @@ class ThetaDataHistorical(DataSource):
         bid: float,
         ask: float,
     ) -> Greeks | None:
-        iv = row.get("implied_vol")
-        served_ok = iv is not None and not pd.isna(iv) and float(iv) > 0
-        if served_ok:
+        if iv == iv and iv > 0:  # NaN-safe "served IV present"
             return Greeks(
-                delta=float(row["delta"]),
-                theta=float(row["theta"]),
-                vega=float(row["vega"]),
-                rho=float(row["rho"]) if not pd.isna(row.get("rho")) else None,
-                iv=float(iv),
+                delta=delta,
+                theta=theta,
+                vega=vega,
+                rho=rho if rho == rho else None,
+                iv=iv,
             )
         # Fallback: solve IV from mid via Black-Scholes, recompute greeks.
         mid = (bid + ask) / 2.0
@@ -325,8 +346,13 @@ class ThetaDataHistorical(DataSource):
             ]
             if not match.empty:
                 row = match.iloc[0]
-                g = self._row_greeks(
-                    row,
+
+                def _f(col: str) -> float:
+                    v = row.get(col)
+                    return float(v) if v is not None else float("nan")
+
+                g = self._scalar_greeks(
+                    _f("delta"), _f("theta"), _f("vega"), _f("rho"), _f("implied_vol"),
                     key.strike,
                     str(row["right"]),
                     float(row["underlying_price"]),
