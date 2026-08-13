@@ -125,6 +125,43 @@ engines:
     max_loss_guard_pct: 0.50             # close if calendar loses this much of debit
     use_stops: true
 
+pairs:                                   # cointegration pairs strategy (v2 campaign)
+  universe:                              # liquid same-sector pairs [A, B]
+    - [AMD, TXN]                         # semiconductors (specified)
+    - [SMCI, DELL]                       # server hardware (specified)
+    - [NVDA, AMD]                        # GPU/accelerator semis
+    - [AVGO, QCOM]                       # communications semis
+    - [INTC, MU]                         # semis / memory
+    - [JPM, BAC]                         # money-center banks
+    - [GS, MS]                           # broker-dealers
+    - [XOM, CVX]                         # integrated oil
+    - [HD, LOW]                          # home improvement retail
+    - [V, MA]                            # payment networks
+    - [F, GM]                            # autos
+    - [DAL, UAL]                         # airlines
+  lookback_days: 60                      # rolling OLS + Z-score window (trading days)
+  retest_frequency_days: 5               # recompute beta + ADF every N trading days
+  adf_alpha: 0.05                        # pair active while ADF p-value < alpha
+  z_entry: 2.5                           # |Z| entry trigger
+  z_exit: 1.0                            # |Z| exit trigger (spread normalized)
+  per_trade_risk: 0.02                   # equity fraction at risk per pair position
+  max_adverse_move: 0.10                 # V1 risk basis: assumed worst spread move on notional
+  min_price: 5.0                         # skip legs below this share price
+  shares:                                # V1 cost model
+    half_spread_bps: 1.5                 # large-cap liquid half-spread
+    slippage_bps: 2.0
+    commission_per_share: 0.0            # Alpaca
+    borrow_apr_default: 0.005            # general-collateral borrow
+    borrow_apr_overrides:
+      SMCI: 0.10                         # episodically hard-to-borrow (estimate)
+    hard_to_borrow_skip: []              # symbols to skip entirely on the short side
+  options:                               # V2 structure
+    dte_window_trading_days: [1, 2]      # enter only when an expiry sits 1-2 TD out
+    expiry_liquidation_time: "14:00"     # never hold past this on expiry day
+    max_consecutive_rolls: 10            # sanity cap; Z-exit or deactivation ends earlier
+    equal_premium_tolerance: 0.30        # allowed premium mismatch between legs
+    min_premium: 0.10                    # skip options quoted below this (spread dominates)
+
 # ---------------------------------------------------------------------------
 # RISK — authoritative. These limits are enforced by RiskManager on every
 # order and are never relaxed by any module, optimizer, or sweep result.

@@ -166,18 +166,23 @@ class ThetaDataHistorical(DataSource):
         at: datetime,
         expiries: list[date] | None = None,
         max_dte: int | None = None,
+        include_liquidity: bool = True,
     ) -> OptionChain:
+        """``include_liquidity=False`` skips the volume/OI pulls (2 of 3
+        requests per expiration) for callers that don't gate on them."""
         day = at.date()
         snap = at.time()
+        # Same-day expiries are valid: expiry-day liquidation (e.g. the pairs
+        # strategy's 14:00 stop) needs quotes on options expiring today.
         if expiries is not None:
-            expiries = sorted(e for e in expiries if e > day)
+            expiries = sorted(e for e in expiries if e >= day)
         else:
             horizon = day + timedelta(days=max_dte if max_dte is not None else self._cfg.chain_max_dte)
-            expiries = [e for e in self._expirations(symbol) if day < e <= horizon]
+            expiries = [e for e in self._expirations(symbol) if day <= e <= horizon]
         if not expiries:
             raise DataUnavailableError(f"No expirations for {symbol} within horizon of {day}")
 
-        memo_key = (symbol, day, snap, tuple(expiries))
+        memo_key = (symbol, day, snap, tuple(expiries), include_liquidity)
         memoized = self._chain_memo.get(memo_key)
         if memoized is not None:
             self._chain_memo.move_to_end(memo_key)
@@ -187,8 +192,9 @@ class ThetaDataHistorical(DataSource):
         jobs: list[tuple[str, str, str, dict[str, str]]] = []
         for expiry in expiries:
             jobs.append(self._greeks_job(symbol, expiry, day, snap))
-            jobs.append(self._eod_job(symbol, expiry, day))
-            jobs.append(self._oi_job(symbol, expiry, day))
+            if include_liquidity:
+                jobs.append(self._eod_job(symbol, expiry, day))
+                jobs.append(self._oi_job(symbol, expiry, day))
         self._prefetch(jobs)
 
         contracts: list[OptionContract] = []
@@ -203,7 +209,7 @@ class ThetaDataHistorical(DataSource):
 
             # Column-array assembly: this path runs thousands of times per
             # backtest and row-wise iteration dominated cache-hot run time.
-            eod = self._eod_frame(symbol, expiry, day)
+            eod = self._eod_frame(symbol, expiry, day) if include_liquidity else pd.DataFrame()
             vol_map: dict[tuple[float, str], int] = {}
             if not eod.empty:
                 vol_map = {
@@ -211,7 +217,7 @@ class ThetaDataHistorical(DataSource):
                     for k, r, v in zip(eod["strike"], eod["right"], eod["volume"])
                 }
 
-            oi = self._oi_frame(symbol, expiry, day)
+            oi = self._oi_frame(symbol, expiry, day) if include_liquidity else pd.DataFrame()
             oi_map: dict[tuple[float, str], int] = {}
             if not oi.empty:
                 oi_map = {

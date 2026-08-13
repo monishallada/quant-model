@@ -175,6 +175,37 @@ class EnginesConfig(_FrozenModel):
     engine_d: EngineDConfig
 
 
+class PairsSharesConfig(_FrozenModel):
+    half_spread_bps: float
+    slippage_bps: float
+    commission_per_share: float
+    borrow_apr_default: float
+    borrow_apr_overrides: dict[str, float]
+    hard_to_borrow_skip: list[str]
+
+
+class PairsOptionsConfig(_FrozenModel):
+    dte_window_trading_days: tuple[int, int]
+    expiry_liquidation_time: str
+    max_consecutive_rolls: int
+    equal_premium_tolerance: float
+    min_premium: float
+
+
+class PairsConfig(_FrozenModel):
+    universe: list[tuple[str, str]]
+    lookback_days: int
+    retest_frequency_days: int
+    adf_alpha: float
+    z_entry: float
+    z_exit: float
+    per_trade_risk: float
+    max_adverse_move: float
+    min_price: float
+    shares: PairsSharesConfig
+    options: PairsOptionsConfig
+
+
 class HedgeConfig(_FrozenModel):
     symbol: str
     put_delta: float
@@ -281,6 +312,7 @@ class Config(_FrozenModel):
     screener: ScreenerConfig
     signals: SignalsConfig
     engines: EnginesConfig
+    pairs: PairsConfig
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig
