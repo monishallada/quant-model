@@ -15,10 +15,10 @@ from catalyst.core.models import (
     Side,
     SignalResult,
 )
-from catalyst.engines.engine_a_convexity import EngineAConvexity
-from catalyst.engines.engine_b_crush_spread import EngineBCrushSpread
-from catalyst.engines.engine_c_pead import EngineCPead
-from catalyst.engines.engine_d_calendar import EngineDCalendar
+from catalyst.archive.engines.engine_a_convexity import EngineAConvexity
+from catalyst.archive.engines.engine_b_crush_spread import EngineBCrushSpread
+from catalyst.archive.engines.engine_c_pead import EngineCPead
+from catalyst.archive.engines.engine_d_calendar import EngineDCalendar
 from tests.conftest import FakeIVRank, build_chain
 
 CFG = load_config("backtest")
@@ -40,7 +40,8 @@ def catalyst_on(d: date, hour: int = 16, ctype: CatalystType = CatalystType.OTHE
 
 
 def make_engine_a(rank: float | None = 20.0) -> EngineAConvexity:
-    return EngineAConvexity(CFG.engines.engine_a, CFG.risk, FakeIVRank(rank))
+    cfg = CFG.engines.engine_a.model_copy(update={"enabled": True})  # archived: off in config
+    return EngineAConvexity(cfg, CFG.risk, FakeIVRank(rank))
 
 
 def test_engine_a_proposes_otm_call_on_long() -> None:
@@ -96,7 +97,8 @@ def test_engine_a_puts_on_short_signal() -> None:
 
 
 def make_engine_b() -> EngineBCrushSpread:
-    return EngineBCrushSpread(CFG.engines.engine_b, CFG.risk)
+    cfg = CFG.engines.engine_b.model_copy(update={"enabled": True})  # archived: off in config
+    return EngineBCrushSpread(cfg, CFG.risk)
 
 
 def test_engine_b_debit_spread_structure() -> None:
@@ -141,7 +143,8 @@ def test_engine_b_skips_neutral_and_window() -> None:
 
 
 def make_engine_c(rank: float = 30.0) -> EngineCPead:
-    return EngineCPead(CFG.engines.engine_c, CFG.risk, FakeIVRank(rank))
+    cfg = CFG.engines.engine_c.model_copy(update={"enabled": True})  # archived: off in config
+    return EngineCPead(cfg, CFG.risk, FakeIVRank(rank))
 
 
 def earnings(d: date, actual: float, estimate: float, hour: int = 16) -> Catalyst:

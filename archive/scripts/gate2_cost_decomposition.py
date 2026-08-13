@@ -17,7 +17,7 @@ from catalyst.core.config import load_config
 from catalyst.backtest.backtester import Backtester
 from catalyst.risk.gate import FixedFractionalGate
 from catalyst.runners.backtest_runner import format_result
-from catalyst.runners.gate2_runner import build_engine, build_signal, load_catalysts
+from catalyst.archive.runners.gate2_runner import build_engine, build_signal, load_catalysts
 from catalyst.data.alpaca_history import AlpacaDailyBars
 from catalyst.data.cache import ParquetCache
 from catalyst.data.iv_history import IVRankProvider

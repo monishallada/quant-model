@@ -29,9 +29,9 @@ from catalyst.data.catalysts import StaticEconomicCalendar, YFinanceEarnings
 from catalyst.data.iv_history import IVRankProvider
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.engines.engine_a_convexity import EngineAConvexity
-from catalyst.engines.engine_b_crush_spread import EngineBCrushSpread
-from catalyst.engines.engine_c_pead import EngineCPead
+from catalyst.archive.engines.engine_a_convexity import EngineAConvexity
+from catalyst.archive.engines.engine_b_crush_spread import EngineBCrushSpread
+from catalyst.archive.engines.engine_c_pead import EngineCPead
 from catalyst.risk.gate import FixedFractionalGate
 from catalyst.runners.backtest_runner import format_result
 from catalyst.signals.mean_reversion import MeanReversionSignal

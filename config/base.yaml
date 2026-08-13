@@ -81,8 +81,8 @@ signals:
     zscore_threshold: 2.0
 
 engines:
-  engine_a:                              # Pre-catalyst convexity (DRIVER)
-    enabled: true
+  engine_a:                              # Pre-catalyst convexity (DRIVER) — ARCHIVED 2026-08-13
+    enabled: false
     dte_window: [5, 10]                  # catalyst this many trading days out
     iv_rank_max: 30.0                    # only buy cheap optionality
     iv_rank_lookback_days: 252
@@ -95,16 +95,16 @@ engines:
     trail_stop_pct: 0.30                 # trailing stop on remainder after tp1
     hold_through_catalyst: false         # exit day before catalyst by default (avoid crush)
     use_stops: true                      # backtest tests stops-on vs stops-off
-  engine_b:                              # Crush-resistant debit spread (STABILIZER)
-    enabled: true
+  engine_b:                              # Crush-resistant debit spread (STABILIZER) — ARCHIVED 2026-08-13
+    enabled: false
     dte_window: [1, 3]
     long_delta: 0.40
     short_delta: 0.20
     per_trade_risk: 0.03                 # % of equity as net debit
     tp_fraction_of_max: 0.60             # take profit at 60% of max spread value
     use_stops: true
-  engine_c:                              # Post-earnings drift (ANOMALY)
-    enabled: true
+  engine_c:                              # Post-earnings drift (ANOMALY) — ARCHIVED 2026-08-13
+    enabled: false
     entry_window_days: [0, 2]            # trading days AFTER the earnings report
     min_surprise_pct: 0.05               # |actual - consensus| / |consensus| >= 5%
     iv_rank_max: 50.0                    # require IV normalized post-crush

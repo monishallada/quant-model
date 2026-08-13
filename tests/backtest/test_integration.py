@@ -26,7 +26,7 @@ from catalyst.core.models import (
     SignalResult,
 )
 from catalyst.backtest.backtester import Backtester
-from catalyst.engines.engine_b_crush_spread import EngineBCrushSpread
+from catalyst.archive.engines.engine_b_crush_spread import EngineBCrushSpread
 from catalyst.risk.hedge import HedgeManager
 from catalyst.risk.manager import RiskManager
 from catalyst.screener.catalyst_screener import CatalystScreener
@@ -79,7 +79,7 @@ def run_integrated(screener: CatalystScreener | None = None):
     bt = Backtester(
         cfg=CFG,
         data=StubData(),
-        strategies=[EngineBCrushSpread(CFG.engines.engine_b, CFG.risk)],
+        strategies=[EngineBCrushSpread(CFG.engines.engine_b.model_copy(update={"enabled": True}), CFG.risk)],
         signal=AlwaysLong(),
         catalysts=[CATALYST],
         gate=RiskManager(CFG.risk),

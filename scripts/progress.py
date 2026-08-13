@@ -64,7 +64,7 @@ def read_log_state(log: Path | None) -> tuple[int, int, int]:
     """
     segments_done = 0
     for label, _, _ in SEGMENTS:
-        if (REPO / "results" / "gate2" / f"{label}.json").exists():
+        if (REPO / "archive" / "results" / "gate2" / f"{label}.json").exists():
             segments_done += 1
         else:
             break  # segments finish strictly in order
