@@ -1,0 +1,38 @@
+[
+  {
+    "label": "kinetic-realcost-uncapped-train",
+    "segment": "train",
+    "cost": "realcost-uncapped",
+    "n_trades": 17,
+    "return": -0.11914999999999998,
+    "win_rate": 0.23529411764705882,
+    "profit_factor": 0.6861996312878588,
+    "ev_per_trade": -700.8823529411767,
+    "max_dd": -0.3161447500192589,
+    "top3_share": null
+  },
+  {
+    "label": "kinetic-realcost-uncapped-test",
+    "segment": "test",
+    "cost": "realcost-uncapped",
+    "n_trades": 35,
+    "return": -0.55969,
+    "win_rate": 0.22857142857142856,
+    "profit_factor": 0.24313030778384806,
+    "ev_per_trade": -1599.1142857142859,
+    "max_dd": -0.576369660050327,
+    "top3_share": null
+  },
+  {
+    "label": "kinetic-realcost-uncapped-all",
+    "segment": "all",
+    "cost": "realcost-uncapped",
+    "n_trades": 52,
+    "return": -0.60948,
+    "win_rate": 0.23076923076923078,
+    "profit_factor": 0.40712638982111066,
+    "ev_per_trade": -1172.0769230769233,
+    "max_dd": -0.6288421539172637,
+    "top3_share": null
+  }
+]
