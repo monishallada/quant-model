@@ -243,6 +243,46 @@ class KineticConfig(_FrozenModel):
     exits: KineticExitsConfig
 
 
+class DriftCreditConfig(_FrozenModel):
+    short_delta: float
+    wing_width_pct: float
+    min_credit_fraction: float
+    max_credit_fraction: float
+
+
+class DriftCondorConfig(_FrozenModel):
+    short_delta: float
+    wing_width_pct: float
+
+
+class DriftDebitConfig(_FrozenModel):
+    long_delta: float
+    short_delta: float
+
+
+class DriftExitsConfig(_FrozenModel):
+    tp_credit_fraction: float
+    stop_credit_multiple: float
+    tp_debit_fraction_of_max: float
+    hold_trading_days: int
+    close_before_expiry_days: int
+
+
+class DriftConfig(_FrozenModel):
+    enabled: bool
+    universe: list[str]
+    entry_window_trading_days: tuple[int, int]
+    min_abs_gap: float
+    min_iv_richness: float
+    realized_vol_window: int
+    expiry_days: tuple[int, int]
+    credit: DriftCreditConfig
+    condor: DriftCondorConfig
+    debit: DriftDebitConfig
+    per_trade_risk: float
+    exits: DriftExitsConfig
+
+
 class HedgeConfig(_FrozenModel):
     symbol: str
     put_delta: float
@@ -355,6 +395,7 @@ class Config(_FrozenModel):
     engines: EnginesConfig
     pairs: PairsConfig
     kinetic: KineticConfig
+    drift: DriftConfig
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig

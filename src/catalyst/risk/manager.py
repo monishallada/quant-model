@@ -134,8 +134,14 @@ class RiskManager:
         if breaker is not None:
             return GateDecision(0, breaker)
 
-        if proposal.unit_max_loss <= 0 or proposal.unit_cost <= 0:
-            return GateDecision(0, "non-positive unit cost/max-loss")
+        # Max loss is the risk basis for EVERY structure. A credit structure
+        # has a negative unit_cost (premium received) but a real, positive max
+        # loss (width - credit) that must be reserved exactly like a debit —
+        # which is also how a broker margins it.
+        if proposal.unit_max_loss <= 0:
+            return GateDecision(0, "non-positive max loss")
+        if proposal.unit_cost != proposal.unit_cost:  # NaN guard
+            return GateDecision(0, "non-finite unit cost")
 
         # Size against worst-case entry cost plus the configured slippage
         # buffer so the risk budget is a HARD bound: actual fills can be worse

@@ -9,6 +9,7 @@ poisoned by splits (TSLA/NVDA/AMZN in-window).
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 
 import httpx
@@ -34,6 +35,31 @@ class AlpacaDailyBars:
             timeout=30.0,
         )
 
+    def _get_with_retry(self, symbol: str, params: dict[str, str],
+                        max_attempts: int = 6) -> dict | None:
+        """GET with backoff. Alpaca rate-limits at 200 req/min and answers 429;
+        a bulk universe pull hits that routinely, so it must be handled rather
+        than crash a multi-hour run."""
+        for attempt in range(max_attempts):
+            try:
+                resp = self._http.get(f"/v2/stocks/{symbol}/bars", params=params)
+            except httpx.HTTPError as exc:
+                logger.warning("Alpaca request error %s: %s", symbol, exc)
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 429 or resp.status_code >= 500:
+                wait = 2.0 * (2 ** attempt)
+                logger.warning("Alpaca %s -> HTTP %d; retrying in %.0fs",
+                               symbol, resp.status_code, wait)
+                time.sleep(wait)
+                continue
+            logger.warning("Alpaca %s -> HTTP %d: %s", symbol, resp.status_code, resp.text[:160])
+            return None
+        logger.warning("Alpaca %s exhausted retries", symbol)
+        return None
+
     def get_history(
         self, symbol: str, start: date, end: date, interval: str = "1d"
     ) -> pd.DataFrame:
@@ -57,9 +83,9 @@ class AlpacaDailyBars:
             }
             if page_token:
                 params["page_token"] = page_token
-            resp = self._http.get(f"/v2/stocks/{symbol}/bars", params=params)
-            resp.raise_for_status()
-            payload = resp.json()
+            payload = self._get_with_retry(symbol, params)
+            if payload is None:
+                break
             for bar in payload.get("bars") or []:
                 rows.append(
                     {

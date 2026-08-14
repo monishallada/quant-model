@@ -163,9 +163,9 @@ pairs:                                   # cointegration pairs strategy — ARCH
     equal_premium_tolerance: 0.30        # allowed premium mismatch between legs
     min_premium: 0.10                    # skip options quoted below this (spread dominates)
 
-kinetic:                                 # Kinetic Ignition Engine (intraday PEAD momentum)
-  enabled: true
-  universe:
+kinetic:                                 # Kinetic Ignition Engine (intraday PEAD momentum) — ARCHIVED 2026-08-14
+  enabled: false
+  universe: &liquid_universe
     - "AAPL"
     - "MSFT"
     - "NVDA"
@@ -315,6 +315,33 @@ kinetic:                                 # Kinetic Ignition Engine (intraday PEA
     candle_minutes: 5
     hard_stop_loss: -0.50                # option value <= 50% of entry value
     time_stop: "15:50"                   # never hold overnight
+
+drift:                                   # Drift Harvest — post-earnings defined-risk credit spreads
+  enabled: true
+  universe: *liquid_universe             # same 130 liquid optionable names
+  entry_window_trading_days: [2, 5]      # enter this many sessions AFTER the reaction day
+  min_abs_gap: 0.04                      # |realized overnight gap| — the measured "surprise"
+  min_iv_richness: 1.10                  # ATM IV / trailing realized vol; only sell when paid well
+  realized_vol_window: 20                # trading days for realized vol
+  expiry_days: [14, 35]                  # 2-4 week expiry (theta works FOR us here)
+  credit:                                # Arm A — directional credit spread (the new strategy)
+    short_delta: 0.28                    # short leg, on the FAR side of the drift
+    wing_width_pct: 0.05                 # long wing this far beyond short strike (% of spot)
+    min_credit_fraction: 0.15            # skip if credit < this fraction of width (not paid enough)
+    max_credit_fraction: 0.60            # skip if credit >= this (mispriced/illiquid quote)
+  condor:                                # Arm B — direction-neutral control (isolates VRP)
+    short_delta: 0.28
+    wing_width_pct: 0.05
+  debit:                                 # Arm C — drift-direction debit spread (isolates PEAD)
+    long_delta: 0.40
+    short_delta: 0.20
+  per_trade_risk: 0.02                   # equity fraction at risk (RiskManager authoritative)
+  exits:
+    tp_credit_fraction: 0.55             # close after capturing this share of max credit
+    stop_credit_multiple: 2.0            # close if liability reaches this multiple of credit
+    tp_debit_fraction_of_max: 0.60       # debit arm: take profit at this fraction of width
+    hold_trading_days: 10                # drift window
+    close_before_expiry_days: 2
 
 # ---------------------------------------------------------------------------
 # RISK — authoritative. These limits are enforced by RiskManager on every

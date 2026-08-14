@@ -187,6 +187,10 @@ class ExitRules(_Model):
     tp1_gain: float | None = None  # scale out tp1_fraction at this gain (e.g. 1.0 = +100%)
     tp1_fraction: float | None = None
     tp_fraction_of_max: float | None = None  # spreads: close at this fraction of max value
+    # CREDIT structures (net premium received; entry_price < 0). Both default to
+    # None so debit-only strategies keep exactly their previous behavior.
+    tp_credit_fraction: float | None = None  # close after capturing this share of the credit
+    stop_credit_multiple: float | None = None  # close if liability reaches N x credit received
     trail_stop_pct: float | None = None  # trailing stop on remainder after tp1
     stop_loss_pct: float | None = None  # soft stop as fraction of premium (negative)
     use_stops: bool = True
@@ -216,6 +220,8 @@ class Order(_Model):
     position_id: str | None = None  # required when intent == CLOSE
     exit_rules: ExitRules | None = None  # attached on OPEN; stored on the resulting position
     direction: Direction | None = None  # thesis direction; stored on the position
+    max_loss: float | None = None  # per-unit max loss; required for credit structures,
+    #   where the premium paid is negative and cannot serve as the risk basis
 
     @property
     def is_multi_leg(self) -> bool:
@@ -261,6 +267,7 @@ class Position(_MutableModel):
     high_water_value: float = 0.0  # best mark seen, for trailing stops
     tp1_done: bool = False
     realized_pnl: float = 0.0  # from partial exits, total dollars
+    max_loss: float | None = None  # per-unit max loss when it is not the debit paid
 
     @property
     def unrealized_pnl(self) -> float:
@@ -268,8 +275,14 @@ class Position(_MutableModel):
 
     @property
     def premium_at_risk(self) -> float:
-        """Max remaining loss in dollars (debit structures: what's still paid)."""
-        return max(self.entry_price, 0.0) * self.qty * 100.0
+        """Max remaining loss in dollars.
+
+        Debit structures: the premium still paid. Credit structures set
+        ``max_loss`` explicitly (width - credit), because their entry price is
+        negative and would otherwise report zero risk to the portfolio caps.
+        """
+        basis = self.max_loss if self.max_loss is not None else max(self.entry_price, 0.0)
+        return max(basis, 0.0) * self.qty * 100.0
 
     @property
     def underlying(self) -> str:

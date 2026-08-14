@@ -134,7 +134,8 @@ def build_chain(spot: float, expiries: list[date]) -> OptionChain:
 
 
 def make_engine():
-    return KineticIgnitionEngine(CFG.kinetic, CFG.risk, screener())
+    cfg = CFG.kinetic.model_copy(update={"enabled": True})  # archived: off in config
+    return KineticIgnitionEngine(cfg, CFG.risk, screener())
 
 
 def test_selects_nearest_expiry_within_max_dte() -> None:

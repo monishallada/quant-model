@@ -186,6 +186,7 @@ class SimulatedBroker(Broker):
                 exit_rules=order.exit_rules or ExitRules(),
                 current_value=unit_net,
                 high_water_value=unit_net,
+                max_loss=order.max_loss,
             )
             self._positions[pos.position_id] = pos
             self.cash += cash_flow

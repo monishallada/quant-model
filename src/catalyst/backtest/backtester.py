@@ -82,6 +82,7 @@ class Backtester:
         gate: EntryGate,
         hedger: object | None = None,  # HedgeManager (M3); None = no hedge sleeve
         screener: object | None = None,  # CatalystScreener; gates PRE-event entries
+        catalyst_lookback_days: int = _CATALYST_LOOKBACK_DAYS,
         label: str = "backtest",
     ) -> None:
         self._cfg = cfg
@@ -92,6 +93,7 @@ class Backtester:
         self._gate = gate
         self._hedger = hedger
         self._screener = screener
+        self._lookback_days = catalyst_lookback_days
         self._label = label
         hh, mm = cfg.data.snapshot_time.split(":")
         self._snap = time(int(hh), int(mm))
@@ -169,7 +171,7 @@ class Backtester:
         out = []
         for c in symbol_catalysts:
             delta_days = (c.when.date() - session).days
-            if -_CATALYST_LOOKBACK_DAYS <= delta_days <= _CATALYST_LOOKAHEAD_DAYS:
+            if -self._lookback_days <= delta_days <= _CATALYST_LOOKAHEAD_DAYS:
                 out.append(c)
         return out
 
@@ -470,6 +472,7 @@ class Backtester:
             intent=OrderIntent.OPEN,
             exit_rules=proposal.exit_rules,
             direction=proposal.direction,
+            max_loss=proposal.unit_max_loss,
         )
         result = broker.place_order(order)
         if result.status is not OrderStatus.FILLED:

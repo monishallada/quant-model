@@ -65,8 +65,26 @@ def evaluate_exits(position: Position, today: date) -> list[ExitAction]:
 
     entry = position.entry_price
     value = position.current_value
+
+    # 4b. CREDIT structures (net premium received: entry_price < 0). Profit is
+    #     decay of the liability toward zero, so the debit rules below — which
+    #     divide by a positive premium — do not apply.
+    if entry < 0:
+        credit = -entry  # premium collected per unit
+        liability = -value  # cost to buy the structure back now
+        captured = (credit - liability) / credit  # 1.0 = expired worthless
+        if rules.tp_credit_fraction is not None and captured >= rules.tp_credit_fraction:
+            return [ExitAction(pid, 1.0, "take_profit_credit")]
+        if (
+            rules.use_stops
+            and rules.stop_credit_multiple is not None
+            and liability >= rules.stop_credit_multiple * credit
+        ):
+            return [ExitAction(pid, 1.0, "stop_loss_credit")]
+        return []
+
     if entry <= 0:
-        return []  # credit/zero-cost structures handled by engine-specific rules only
+        return []  # zero-cost structures: engine-specific rules only
     gain = (value - entry) / entry
 
     # 4. Stop loss (soft stop; per-engine stops-on/off is a config decision).

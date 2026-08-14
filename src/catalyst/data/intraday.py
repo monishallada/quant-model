@@ -19,6 +19,7 @@ the spec's requirement that the engine reason in exchange-local time.
 from __future__ import annotations
 
 import logging
+import time as _time
 from datetime import date, datetime, time, timedelta
 
 import httpx
@@ -34,6 +35,29 @@ logger = logging.getLogger(__name__)
 _ET = "America/New_York"
 _DATA_URL = "https://data.alpaca.markets"
 _BAR_COLUMNS = ["open", "high", "low", "close", "volume"]
+
+
+def _request_with_retry(http: httpx.Client, symbol: str, params: dict[str, str],
+                        max_attempts: int = 6) -> dict | None:
+    """GET bars with backoff on 429/5xx. Alpaca rate-limits bulk universe pulls."""
+    for attempt in range(max_attempts):
+        try:
+            resp = http.get(f"/v2/stocks/{symbol}/bars", params=params)
+        except httpx.HTTPError as exc:
+            logger.warning("Alpaca request error %s: %s", symbol, exc)
+            _time.sleep(2.0 * (attempt + 1))
+            continue
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code == 429 or resp.status_code >= 500:
+            wait = 2.0 * (2 ** attempt)
+            logger.warning("Alpaca %s -> HTTP %d; retrying in %.0fs", symbol, resp.status_code, wait)
+            _time.sleep(wait)
+            continue
+        logger.warning("Alpaca %s -> HTTP %d: %s", symbol, resp.status_code, resp.text[:160])
+        return None
+    logger.warning("Alpaca %s exhausted retries", symbol)
+    return None
 
 
 class AlpacaMinuteBars:
@@ -76,16 +100,9 @@ class AlpacaMinuteBars:
             }
             if page_token:
                 params["page_token"] = page_token
-            try:
-                resp = self._http.get(f"/v2/stocks/{symbol}/bars", params=params)
-            except httpx.HTTPError as exc:
-                logger.warning("Alpaca minute bars failed %s %s: %s", symbol, day, exc)
+            payload = _request_with_retry(self._http, symbol, params)
+            if payload is None:
                 break
-            if resp.status_code != 200:
-                logger.warning("Alpaca minute bars %s %s -> HTTP %d: %s",
-                               symbol, day, resp.status_code, resp.text[:160])
-                break
-            payload = resp.json()
             for bar in payload.get("bars") or []:
                 rows.append({
                     "ts": pd.Timestamp(bar["t"]).tz_convert(_ET).tz_localize(None),
@@ -103,6 +120,17 @@ class AlpacaMinuteBars:
             return pd.DataFrame(columns=_BAR_COLUMNS)
         return df.set_index(pd.to_datetime(df["ts"])).drop(columns=["ts"])
 
+    def daily_bars(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        """Daily open/close series, date-indexed. One cached request per symbol."""
+        df = self._daily_frame(symbol, start, end)
+        if df.empty:
+            return pd.DataFrame(columns=["open", "close"])
+        out = pd.DataFrame({"open": df["open"].to_numpy(dtype=float),
+                            "close": df["close"].to_numpy(dtype=float)},
+                           index=pd.to_datetime(df["day"]).dt.date)
+        out.index.name = "date"
+        return out
+
     def daily_closes(self, symbol: str, start: date, end: date) -> pd.Series:
         """Full daily close series for a symbol, fetched once and cached.
 
@@ -110,8 +138,20 @@ class AlpacaMinuteBars:
         is never corrupted by an adjustment mismatch across sources. One request
         per symbol instead of one per symbol-day.
         """
+        df = self._daily_frame(symbol, start, end)
+        if df.empty:
+            return pd.Series(dtype=float)
+        return pd.Series(df["close"].to_numpy(dtype=float),
+                         index=pd.to_datetime(df["day"]).dt.date, dtype=float)
+
+    def _daily_frame(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        """Raw cached daily bars (day/open/close) for a symbol."""
         key = f"{symbol}_{start:%Y%m%d}_{end:%Y%m%d}_sipdaily"
         cached = self._cache.get("alpaca_daily_sip", key)
+        # Frames cached before opens were needed carry only closes; refetch them
+        # rather than let a missing column silently break the gap calculation.
+        if cached is not None and not cached.empty and "open" not in cached.columns:
+            cached = None
         if cached is None:
             rows: list[dict[str, object]] = []
             page_token: str | None = None
@@ -122,26 +162,18 @@ class AlpacaMinuteBars:
                 }
                 if page_token:
                     params["page_token"] = page_token
-                try:
-                    resp = self._http.get(f"/v2/stocks/{symbol}/bars", params=params)
-                except httpx.HTTPError as exc:
-                    logger.warning("Alpaca daily bars failed %s: %s", symbol, exc)
+                payload = _request_with_retry(self._http, symbol, params)
+                if payload is None:
                     break
-                if resp.status_code != 200:
-                    logger.warning("Alpaca daily %s -> HTTP %d", symbol, resp.status_code)
-                    break
-                payload = resp.json()
                 for bar in payload.get("bars") or []:
-                    rows.append({"day": bar["t"][:10], "close": float(bar["c"])})
+                    rows.append({"day": bar["t"][:10], "open": float(bar["o"]),
+                                 "close": float(bar["c"])})
                 page_token = payload.get("next_page_token")
                 if not page_token:
                     break
-            cached = pd.DataFrame(rows, columns=["day", "close"])
+            cached = pd.DataFrame(rows, columns=["day", "open", "close"])
             self._cache.put("alpaca_daily_sip", key, cached)
-        if cached.empty:
-            return pd.Series(dtype=float)
-        return pd.Series(cached["close"].to_numpy(),
-                         index=pd.to_datetime(cached["day"]).dt.date, dtype=float)
+        return cached
 
     def prior_close(self, symbol: str, day: date, closes: pd.Series | None = None) -> float | None:
         """Prior regular-session close. Pass ``closes`` from ``daily_closes``."""
