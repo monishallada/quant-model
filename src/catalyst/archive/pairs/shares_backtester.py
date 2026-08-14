@@ -46,7 +46,7 @@ from catalyst.core.models import (
 from catalyst.core.tradingcal import sessions_in_range
 from catalyst.backtest import metrics as m
 from catalyst.backtest.montecarlo import probability_of_ruin
-from catalyst.pairs.cointegration import CointegrationEngine, PairState
+from catalyst.archive.pairs.cointegration import CointegrationEngine, PairState
 from catalyst.risk.manager import RiskManager
 
 logger = logging.getLogger(__name__)

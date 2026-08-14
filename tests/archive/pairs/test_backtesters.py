@@ -12,8 +12,8 @@ import pytest
 from catalyst.core.config import load_config
 from catalyst.core.models import OptionChain, OptionRight, Side
 from catalyst.core.tradingcal import add_trading_days, sessions_in_range
-from catalyst.pairs.options_backtester import PairsOptionsBacktester
-from catalyst.pairs.shares_backtester import PairsSharesBacktester
+from catalyst.archive.pairs.options_backtester import PairsOptionsBacktester
+from catalyst.archive.pairs.shares_backtester import PairsSharesBacktester
 from tests.conftest import build_chain
 
 CFG_BASE = load_config("backtest")

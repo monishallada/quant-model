@@ -56,7 +56,7 @@ from catalyst.backtest.montecarlo import probability_of_ruin
 from catalyst.brokers.simulated import SimulatedBroker
 from catalyst.data.thetadata_historical import DataUnavailableError, ThetaDataHistorical
 from catalyst.engines.util import atm_contract
-from catalyst.pairs.cointegration import CointegrationEngine, PairState
+from catalyst.archive.pairs.cointegration import CointegrationEngine, PairState
 from catalyst.risk.manager import RiskManager
 
 logger = logging.getLogger(__name__)

@@ -1,4 +1,6 @@
-# Archived: catalyst-engine strategy set (v1, 2026-08-13)
+# Archived strategy campaigns
+
+## v1 — catalyst-engine set (archived 2026-08-13)
 
 The original catalyst-driven engine set was set aside after its Gate 2/Gate 3
 validation campaign, in favor of testing a cointegration pairs strategy.
@@ -46,3 +48,31 @@ uv run python -m catalyst.archive.runners.gate3_runner --mode full \
 Shared infrastructure (data layer, SimulatedBroker, screener, RiskManager,
 exits, backtester, metrics, config) was **not** archived — it is the validated
 platform every subsequent strategy plugs into.
+
+
+---
+
+## v2 — cointegration pairs (archived 2026-08-13)
+
+Tested and set aside the same day. **Nothing deleted.**
+
+| Piece | Location |
+|---|---|
+| Cointegration engine, V1 shares + V2 options backtesters | `src/catalyst/archive/pairs/` |
+| Runner | `src/catalyst/archive/runners/pairs_runner.py` |
+| Tests (still in CI) | `tests/archive/pairs/` |
+| Results (V1/V2 x real/zero cost x train/test/all + walk-forward) | `archive/results/pairs/` |
+| Verdict document | https://claude.ai/code/artifact/4de7f3ec-b526-41dc-928c-dabde7ec904b |
+
+**Findings:** V1 (shares) lost gross — −5.3% zero-cost over 8.6y — so the signal
+itself had no edge; 81% of trades were force-flattened when pairs decoupled
+(pairs held cointegration only ~14% of sessions). V2 (1–2 DTE ATM options)
+−11.9% real-cost, with 90% of positions dying at the expiry stop and just 1 of
+107 exiting via Z-reversion; its positive test cell was 3 trades = 706% of
+segment P&L (lottery-ticket variance, not edge).
+
+`pairs.enabled: false` in config; the strategy runs only via its archived runner:
+
+```bash
+uv run python -m catalyst.archive.runners.pairs_runner --version 1 --out archive/results/pairs_rerun
+```

@@ -30,8 +30,8 @@ from catalyst.data.alpaca_history import AlpacaDailyBars
 from catalyst.data.cache import ParquetCache
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.pairs.options_backtester import PairsOptionsBacktester
-from catalyst.pairs.shares_backtester import PairsSharesBacktester
+from catalyst.archive.pairs.options_backtester import PairsOptionsBacktester
+from catalyst.archive.pairs.shares_backtester import PairsSharesBacktester
 from catalyst.runners.backtest_runner import format_result
 
 logger = logging.getLogger(__name__)

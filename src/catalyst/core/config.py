@@ -193,6 +193,7 @@ class PairsOptionsConfig(_FrozenModel):
 
 
 class PairsConfig(_FrozenModel):
+    enabled: bool
     universe: list[tuple[str, str]]
     lookback_days: int
     retest_frequency_days: int

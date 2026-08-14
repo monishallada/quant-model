@@ -9,7 +9,7 @@ import pandas as pd
 
 from catalyst.core.config import load_config
 from catalyst.core.tradingcal import sessions_in_range
-from catalyst.pairs.cointegration import CointegrationEngine
+from catalyst.archive.pairs.cointegration import CointegrationEngine
 
 CFG = load_config("backtest")
 START, END = date(2023, 1, 2), date(2024, 6, 28)

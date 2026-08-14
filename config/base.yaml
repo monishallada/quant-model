@@ -125,7 +125,8 @@ engines:
     max_loss_guard_pct: 0.50             # close if calendar loses this much of debit
     use_stops: true
 
-pairs:                                   # cointegration pairs strategy (v2 campaign)
+pairs:                                   # cointegration pairs strategy — ARCHIVED 2026-08-13
+  enabled: false                         # archived; runs only via archived runner
   universe:                              # liquid same-sector pairs [A, B]
     - [AMD, TXN]                         # semiconductors (specified)
     - [SMCI, DELL]                       # server hardware (specified)
