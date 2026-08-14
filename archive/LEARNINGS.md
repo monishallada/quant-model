@@ -11,6 +11,39 @@ monthly return %**, computed geometrically from the equity curve
 
 ---
 
+## ⚠️ The instrument finding — read this first
+
+**Every options campaign lost money. The only positive edge found is in shares.**
+Measured avg monthly return, real costs, full period:
+
+| Campaign | Instrument | Avg monthly |
+|---|---|---|
+| v1 Engine A — pre-catalyst long options | OPTIONS | −0.45% |
+| v1 Engine B — debit spreads | OPTIONS | −2.25% |
+| v1 Integrated A+B+C+hedge | OPTIONS | −0.88% |
+| v2 Pairs V2 — 1–2 DTE options | OPTIONS | −0.12% |
+| v3 Kinetic — 0–3 DTE options | OPTIONS | −1.45% |
+| v4 Drift — credit spreads | OPTIONS | −1.06% |
+| v6 Tournament — 3–5wk OTM calls (standalone) | OPTIONS | −3.89% |
+| v2 Pairs V1 — shares | SHARES | −0.07% |
+| **v5 Alpha Platform — shares + SPY** | **SHARES** | **+1.39%** |
+| *SPY buy-and-hold* | *SHARES* | *+1.00%* |
+
+**Why:** options are an amplifier, not a source of edge. They multiply both the
+signal and the friction. Our best measured directional edge is IC ≈ 0.035, while
+single-name option round trips cost 4–10% of premium ($18–28 per spread
+crossing). The amplification does not overcome the cost, so expressing a small
+edge through options converts a slightly positive strategy into a clearly
+negative one — demonstrated seven separate ways.
+
+**The honest role for options here** is the convex sleeve: not the return
+engine, but a bounded-cost lottery ticket that supplies a right tail a
+compounding book cannot. That is exactly how v7 uses them (20% allocation).
+
+**The one untested options path worth trying:** index options (SPY/SPX) are
+penny-wide and 5–10× cheaper to trade than single names, which is the variable
+that killed every campaign above.
+
 ## Rules earned the hard way — do not re-test these
 
 | Rule | Evidence |
