@@ -76,6 +76,47 @@ def calmar(equity: pd.Series) -> float:
     return float(cagr / mdd)
 
 
+def avg_monthly_return(equity: pd.Series) -> float:
+    """THE headline number for every strategy report.
+
+    Geometric (compounding-consistent) average monthly return derived from the
+    equity curve: the constant monthly rate that reproduces the realized total
+    return over the period. Reported ahead of every other statistic because it
+    is the figure decisions are actually made on.
+    """
+    if len(equity) < 2 or equity.iloc[0] <= 0 or equity.iloc[-1] <= 0:
+        return 0.0
+    months = len(equity) / (TRADING_DAYS_PER_YEAR / 12.0)
+    if months <= 0:
+        return 0.0
+    return float((equity.iloc[-1] / equity.iloc[0]) ** (1.0 / months) - 1.0)
+
+
+def monthly_return_series(equity: pd.Series) -> pd.Series:
+    """Realized month-by-month returns, for distribution and consistency stats."""
+    if equity.empty:
+        return pd.Series(dtype=float)
+    monthly = equity.resample("ME").last().dropna()
+    return monthly.pct_change().dropna()
+
+
+def headline(equity: pd.Series) -> dict[str, float]:
+    """The standard header block every strategy report leads with."""
+    monthly = monthly_return_series(equity)
+    years = len(equity) / TRADING_DAYS_PER_YEAR
+    cagr = ((equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1.0) if years > 0 and len(equity) > 1 else 0.0
+    return {
+        "avg_monthly_return": avg_monthly_return(equity),
+        "median_monthly_return": float(monthly.median()) if len(monthly) else 0.0,
+        "best_month": float(monthly.max()) if len(monthly) else 0.0,
+        "worst_month": float(monthly.min()) if len(monthly) else 0.0,
+        "pct_months_positive": float((monthly > 0).mean()) if len(monthly) else 0.0,
+        "cagr": cagr,
+        "max_drawdown": max_drawdown(equity),
+        "n_months": len(monthly),
+    }
+
+
 def profit_factor(trades: list[TradeRecord]) -> float:
     """Gross wins / gross losses. inf when there are no losing trades."""
     gross_win = sum(t.pnl for t in trades if t.pnl > 0)

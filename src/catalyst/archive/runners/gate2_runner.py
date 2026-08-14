@@ -33,7 +33,7 @@ from catalyst.archive.engines.engine_a_convexity import EngineAConvexity
 from catalyst.archive.engines.engine_b_crush_spread import EngineBCrushSpread
 from catalyst.archive.engines.engine_c_pead import EngineCPead
 from catalyst.risk.gate import FixedFractionalGate
-from catalyst.runners.backtest_runner import format_result
+from catalyst.archive.runners.backtest_runner import format_result
 from catalyst.signals.mean_reversion import MeanReversionSignal
 from catalyst.signals.neutral import NeutralSignal
 from catalyst.signals.trend import TrendSignal

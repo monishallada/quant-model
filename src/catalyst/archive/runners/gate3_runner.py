@@ -38,7 +38,7 @@ from catalyst.data.thetadata_historical import ThetaDataHistorical
 from catalyst.risk.hedge import HedgeManager
 from catalyst.risk.manager import RiskManager
 from catalyst.screener.catalyst_screener import CatalystScreener
-from catalyst.runners.backtest_runner import format_result
+from catalyst.archive.runners.backtest_runner import format_result
 from catalyst.archive.runners.gate2_runner import build_engine, build_signal, load_catalysts
 
 logger = logging.getLogger(__name__)

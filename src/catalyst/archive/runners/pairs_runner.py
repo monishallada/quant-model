@@ -32,7 +32,7 @@ from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
 from catalyst.archive.pairs.options_backtester import PairsOptionsBacktester
 from catalyst.archive.pairs.shares_backtester import PairsSharesBacktester
-from catalyst.runners.backtest_runner import format_result
+from catalyst.archive.runners.backtest_runner import format_result
 
 logger = logging.getLogger(__name__)
 
