@@ -283,6 +283,20 @@ class DriftConfig(_FrozenModel):
     exits: DriftExitsConfig
 
 
+class TournamentConfigModel(_FrozenModel):
+    enabled: bool
+    universe: list[str]
+    window_months: int
+    target_multiple: float
+    n_positions: int
+    hold_days: int
+    dte_days: int
+    moneyness: float
+    capital_fraction: float
+    spread_pct: float
+    cost_per_contract: float
+
+
 class HedgeConfig(_FrozenModel):
     symbol: str
     put_delta: float
@@ -396,6 +410,7 @@ class Config(_FrozenModel):
     pairs: PairsConfig
     kinetic: KineticConfig
     drift: DriftConfig
+    tournament: TournamentConfigModel
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig

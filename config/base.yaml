@@ -343,6 +343,39 @@ drift:                                   # Drift Harvest — post-earnings defin
     hold_trading_days: 10                # drift window
     close_before_expiry_days: 2
 
+tournament:                              # winner-take-all competition objective
+  enabled: true
+  universe:                              # high-volatility optionable names — volatility is
+    - "RIOT"                             # the raw material for a threshold objective
+    - "MARA"
+    - "SMCI"
+    - "IONQ"
+    - "RGTI"
+    - "PLTR"
+    - "COIN"
+    - "HOOD"
+    - "SOUN"
+    - "TSLA"
+    - "NVDA"
+    - "AFRM"
+    - "UPST"
+    - "CVNA"
+    - "AMD"
+    - "ENPH"
+    - "RIVN"
+    - "LCID"
+    - "MSTR"
+    - "APP"
+  window_months: 7                       # competition length (6-8 month window)
+  target_multiple: 10.0                  # what "winning" plausibly requires
+  n_positions: 3                         # concentration
+  hold_days: 21
+  dte_days: 35
+  moneyness: 1.10                        # OTM strike as fraction of spot
+  capital_fraction: 0.90
+  spread_pct: 0.06
+  cost_per_contract: 0.02
+
 # ---------------------------------------------------------------------------
 # RISK — authoritative. These limits are enforced by RiskManager on every
 # order and are never relaxed by any module, optimizer, or sweep result.
