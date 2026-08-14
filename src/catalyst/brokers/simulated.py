@@ -130,12 +130,13 @@ class SimulatedBroker(Broker):
             mid = contract.mid
             frac = self._fill.spread_fill_fraction
             slip = self._fill.slippage_pct_of_premium
+            flat = self._fill.slippage_per_contract
             if leg.side is Side.BUY:
                 px = mid + frac * (contract.ask - mid)
-                px *= 1.0 + slip
+                px = px * (1.0 + slip) + flat
             else:
                 px = mid - frac * (mid - contract.bid)
-                px *= 1.0 - slip
+                px = px * (1.0 - slip) - flat
             prices[i] = max(px, 0.0)
         return prices
 

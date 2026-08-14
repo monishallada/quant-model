@@ -76,6 +76,43 @@ def calmar(equity: pd.Series) -> float:
     return float(cagr / mdd)
 
 
+def profit_factor(trades: list[TradeRecord]) -> float:
+    """Gross wins / gross losses. inf when there are no losing trades."""
+    gross_win = sum(t.pnl for t in trades if t.pnl > 0)
+    gross_loss = abs(sum(t.pnl for t in trades if t.pnl <= 0))
+    if gross_loss == 0:
+        return float("inf") if gross_win > 0 else 0.0
+    return gross_win / gross_loss
+
+
+def expected_value(trades: list[TradeRecord]) -> float:
+    """Mean P&L per trade in dollars."""
+    return sum(t.pnl for t in trades) / len(trades) if trades else 0.0
+
+
+def concentration(trades: list[TradeRecord], top_n: int = 3) -> dict[str, float | None]:
+    """Top-N share of total P&L — the lottery-ticket artifact check.
+
+    ``share`` is only defined when total P&L is positive: the check exists to
+    ask whether a WINNING result rests on a handful of trades. Dividing a
+    top-N sum by a negative total produces a meaningless negative percentage,
+    so that case reports None instead of a number that reads like a finding.
+    """
+    if not trades:
+        return {"top_n_pnl": 0.0, "total_pnl": 0.0, "share": None}
+    pnls = sorted((t.pnl for t in trades), reverse=True)
+    top, total = sum(pnls[:top_n]), sum(pnls)
+    return {"top_n_pnl": top, "total_pnl": total,
+            "share": (top / total) if total > 0 else None}
+
+
+def drawdown_curve(equity: pd.Series) -> pd.Series:
+    """Running drawdown as a negative fraction, for plotting."""
+    if equity.empty:
+        return equity
+    return equity / equity.cummax() - 1.0
+
+
 def trade_stats(trades: list[TradeRecord]) -> dict[str, float]:
     if not trades:
         return {"win_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.0, "win_loss_ratio": 0.0}

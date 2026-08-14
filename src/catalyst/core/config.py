@@ -207,6 +207,42 @@ class PairsConfig(_FrozenModel):
     options: PairsOptionsConfig
 
 
+class KineticScanConfig(_FrozenModel):
+    premarket_start: str
+    premarket_end: str
+    min_abs_gap: float
+    min_premarket_volume: int
+
+
+class KineticSignalConfig(_FrozenModel):
+    session_open: str
+    signal_time: str
+
+
+class KineticExecutionConfig(_FrozenModel):
+    max_dte: int
+    nav_fraction: float
+    slippage_per_contract: float
+    synthetic_haircut: float
+    min_premium: float
+
+
+class KineticExitsConfig(_FrozenModel):
+    ema_period: int
+    candle_minutes: int
+    hard_stop_loss: float = Field(lt=0.0)
+    time_stop: str
+
+
+class KineticConfig(_FrozenModel):
+    enabled: bool
+    universe: list[str]
+    scan: KineticScanConfig
+    signal: KineticSignalConfig
+    execution: KineticExecutionConfig
+    exits: KineticExitsConfig
+
+
 class HedgeConfig(_FrozenModel):
     symbol: str
     put_delta: float
@@ -240,6 +276,10 @@ class RiskConfig(_FrozenModel):
 class FillModelConfig(_FrozenModel):
     spread_fill_fraction: float = Field(ge=0.0, le=1.0)
     slippage_pct_of_premium: float = Field(ge=0.0)
+    # Flat per-contract slippage in dollars, applied against the trader on top
+    # of the percentage term. Defaults to 0.0 so every existing config and the
+    # archived campaigns behave exactly as before.
+    slippage_per_contract: float = Field(default=0.0, ge=0.0)
 
 
 class CommissionsConfig(_FrozenModel):
@@ -314,6 +354,7 @@ class Config(_FrozenModel):
     signals: SignalsConfig
     engines: EnginesConfig
     pairs: PairsConfig
+    kinetic: KineticConfig
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig
