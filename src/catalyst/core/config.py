@@ -297,6 +297,22 @@ class TournamentConfigModel(_FrozenModel):
     cost_per_contract: float
 
 
+class IndexVRPConfig(_FrozenModel):
+    enabled: bool
+    symbols: list[str]
+    entry_every_days: int
+    dte_window: tuple[int, int]
+    short_delta: float
+    wing_width_pct: float
+    per_trade_risk: float
+    tp_credit_fraction: float
+    stop_credit_multiple: float
+    close_before_expiry_days: int
+    min_credit_fraction: float
+    iv_rank_min: float
+    max_concurrent: int
+
+
 class HedgeConfig(_FrozenModel):
     symbol: str
     put_delta: float
@@ -411,6 +427,7 @@ class Config(_FrozenModel):
     kinetic: KineticConfig
     drift: DriftConfig
     tournament: TournamentConfigModel
+    index_vrp: IndexVRPConfig
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig

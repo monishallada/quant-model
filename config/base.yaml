@@ -376,6 +376,21 @@ tournament:                              # winner-take-all competition objective
   spread_pct: 0.06
   cost_per_contract: 0.02
 
+index_vrp:                               # v8 — index volatility risk premium harvest
+  enabled: true
+  symbols: ["SPY", "QQQ"]                # measured 0.65% / 0.95% spreads vs 4.4% single-name
+  entry_every_days: 7                    # systematic calendar entry, not event-driven
+  dte_window: [25, 45]                   # target tenor at entry
+  short_delta: 0.25                      # short leg (the premium being sold)
+  wing_width_pct: 0.03                   # long wing this far beyond, as % of spot
+  per_trade_risk: 0.05                   # equity fraction at risk (RiskManager authoritative)
+  tp_credit_fraction: 0.50               # close after capturing this share of the credit
+  stop_credit_multiple: 2.5              # close if the liability reaches N x credit
+  close_before_expiry_days: 2
+  min_credit_fraction: 0.08              # skip if credit < this share of width
+  iv_rank_min: 0.0                       # optional regime gate (0 = always on)
+  max_concurrent: 4                      # overlapping positions allowed
+
 # ---------------------------------------------------------------------------
 # RISK — authoritative. These limits are enforced by RiskManager on every
 # order and are never relaxed by any module, optimizer, or sweep result.
