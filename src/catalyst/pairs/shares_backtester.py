@@ -181,6 +181,8 @@ class PairsSharesBacktester:
                 - self._commission(op.qty_a + op.qty_b)
             )
             cash += pnl
+            if reason == "decoupled":
+                self.trades_on_decoupled += 1
             gross = op.qty_a * op.entry_a + op.qty_b * op.entry_b
             trades.append(TradeRecord(
                 position_id=f"pair-{op.pair[0]}-{op.pair[1]}-{op.entry_session}",
@@ -265,7 +267,6 @@ class PairsSharesBacktester:
                 op = open_pairs.get(pair)
                 if op is not None:
                     if not st.active:
-                        self.trades_on_decoupled += 1
                         pending_close[pair] = "decoupled"
                     elif st.zscore is not None and abs(st.zscore) < self._cfg.pairs.z_exit:
                         pending_close[pair] = "z_reverted"

@@ -193,6 +193,8 @@ class PairsOptionsBacktester:
             if result.status is not OrderStatus.FILLED:
                 logger.warning("V2 close rejected %s (%s): %s", op.pair, reason, result.message)
                 return
+            if reason == "decoupled":
+                self.trades_on_decoupled += 1
             entry_net, unit_entry, entry_time, _, max_qty = trade_entries.pop(op.position_id)
             pnl = (result.avg_fill_price - unit_entry) * result.filled_qty * 100.0 - result.commission
             trades.append(TradeRecord(
@@ -258,7 +260,6 @@ class PairsOptionsBacktester:
                 if st is None:
                     continue
                 if not st.active:
-                    self.trades_on_decoupled += 1
                     close_position(op, session, _ENTRY_SNAP, "decoupled")
                 elif st.zscore is not None and abs(st.zscore) < pcfg.z_exit:
                     close_position(op, session, _ENTRY_SNAP, "z_reverted")
