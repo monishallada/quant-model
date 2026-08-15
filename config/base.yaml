@@ -376,9 +376,13 @@ tournament:                              # winner-take-all competition objective
   spread_pct: 0.06
   cost_per_contract: 0.02
 
-index_vrp:                               # v8 — index volatility risk premium harvest
+index_vrp:                               # v8 — volatility risk premium harvest
   enabled: true
-  symbols: ["SPY", "QQQ"]                # measured 0.65% / 0.95% spreads vs 4.4% single-name
+  # Universe is chosen by MEASURED round-trip cost, not by intuition. The
+  # dividing line is ~5% of premium: above it, the spread eats any plausible
+  # edge before the trade starts. Cheap-looking contracts are the trap — QUBT
+  # costs $54 but 82.6% round trip; SPY costs $447 but 1.6%.
+  symbols: ["SPY", "QQQ"]                # measured 1.6% / 1.9% round-trip cost
   entry_every_days: 7                    # systematic calendar entry, not event-driven
   dte_window: [25, 45]                   # target tenor at entry
   short_delta: 0.25                      # short leg (the premium being sold)
@@ -390,6 +394,18 @@ index_vrp:                               # v8 — index volatility risk premium 
   min_credit_fraction: 0.08              # skip if credit < this share of width
   iv_rank_min: 0.0                       # optional regime gate (0 = always on)
   max_concurrent: 4                      # overlapping positions allowed
+
+persymbol:                               # v9 — per-symbol strategy lab
+  enabled: true
+  universe: ["TSLA", "AMD", "NVDA", "AMZN", "META", "MSFT"]   # cleared the 5% cost screen
+  entry_every_days: 21                   # monthly cycle
+  dte_window: [25, 45]
+  covered_call_delta: 0.30               # OTM call sold against a long share position
+  put_spread_delta: 0.25                 # short leg of the put credit spread
+  wing_width_pct: 0.05
+  tp_credit_fraction: 0.50
+  stop_credit_multiple: 2.5
+  close_before_expiry_days: 2
 
 # ---------------------------------------------------------------------------
 # RISK — authoritative. These limits are enforced by RiskManager on every

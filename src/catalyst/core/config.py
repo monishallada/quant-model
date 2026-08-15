@@ -313,6 +313,19 @@ class IndexVRPConfig(_FrozenModel):
     max_concurrent: int
 
 
+class PerSymbolConfig(_FrozenModel):
+    enabled: bool
+    universe: list[str]
+    entry_every_days: int
+    dte_window: tuple[int, int]
+    covered_call_delta: float
+    put_spread_delta: float
+    wing_width_pct: float
+    tp_credit_fraction: float
+    stop_credit_multiple: float
+    close_before_expiry_days: int
+
+
 class HedgeConfig(_FrozenModel):
     symbol: str
     put_delta: float
@@ -428,6 +441,7 @@ class Config(_FrozenModel):
     drift: DriftConfig
     tournament: TournamentConfigModel
     index_vrp: IndexVRPConfig
+    persymbol: PerSymbolConfig
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig
