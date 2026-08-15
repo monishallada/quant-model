@@ -13,7 +13,7 @@ import pandas as pd
 
 from catalyst.core.config import MeanReversionSignalConfig
 from catalyst.core.interfaces import DirectionalSignal
-from catalyst.core.models import Direction, OptionChain, SignalResult
+from catalyst.core.types import Direction, OptionChain, SignalResult
 
 
 def rsi(closes: pd.Series, period: int) -> float:

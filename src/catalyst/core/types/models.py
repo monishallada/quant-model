@@ -388,3 +388,30 @@ class BacktestResult(_Model):
     trades: list[TradeRecord] = Field(default_factory=list)
     equity_curve: dict[str, float] = Field(default_factory=dict)  # ISO date -> equity
     config_overrides: dict[str, Any] = Field(default_factory=dict)  # sweep provenance
+
+__all__ = [
+    "AccountState",
+    "BacktestResult",
+    "Catalyst",
+    "CatalystType",
+    "Direction",
+    "ExitRules",
+    "Greeks",
+    "MonthlyReturnStats",
+    "OptionChain",
+    "OptionContract",
+    "OptionKey",
+    "OptionRight",
+    "Order",
+    "OrderIntent",
+    "OrderLeg",
+    "OrderResult",
+    "OrderStatus",
+    "Position",
+    "PositionLeg",
+    "ProposedTrade",
+    "Quote",
+    "Side",
+    "SignalResult",
+    "TradeRecord",
+]

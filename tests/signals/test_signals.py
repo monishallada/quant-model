@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from catalyst.core.config import load_config
-from catalyst.core.models import Direction
+from catalyst.core.types import Direction
 from catalyst.signals.mean_reversion import MeanReversionSignal, rsi
 from catalyst.signals.neutral import NeutralSignal
 from catalyst.signals.trend import TrendSignal

@@ -26,7 +26,7 @@ import httpx
 import pandas as pd
 
 from catalyst.core.config import AlpacaConfig, ThetaDataConfig
-from catalyst.core.models import OptionKey, OptionRight
+from catalyst.core.types import OptionKey, OptionRight
 from catalyst.data.cache import ParquetCache
 from catalyst.data.thetadata_client import ThetaDataClient, ThetaDataError
 

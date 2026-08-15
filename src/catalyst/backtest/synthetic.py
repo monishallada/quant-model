@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 
-from catalyst.core.models import Catalyst, CatalystType
+from catalyst.core.types import Catalyst, CatalystType
 from catalyst.core.tradingcal import sessions_in_range
 
 

@@ -15,7 +15,7 @@ import numpy as np
 
 from catalyst.core.config import load_config
 from catalyst.core.interfaces import DataSource, DirectionalSignal
-from catalyst.core.models import (
+from catalyst.core.types import (
     Catalyst,
     CatalystType,
     Direction,
@@ -26,7 +26,7 @@ from catalyst.core.models import (
     SignalResult,
 )
 from catalyst.backtest.backtester import Backtester
-from catalyst.archive.engines.engine_b_crush_spread import EngineBCrushSpread
+from catalyst.strategies.archive.engines.engine_b_crush_spread import EngineBCrushSpread
 from catalyst.risk.hedge import HedgeManager
 from catalyst.risk.manager import RiskManager
 from catalyst.screener.catalyst_screener import CatalystScreener

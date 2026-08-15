@@ -20,13 +20,13 @@ from datetime import date, datetime, time
 import pandas as pd
 
 from catalyst.core.config import Config
-from catalyst.core.models import (AccountState, BacktestResult, Direction, ExitRules,
+from catalyst.core.types import (AccountState, BacktestResult, Direction, ExitRules,
                                   OptionKey, OptionRight, OrderLeg, Position, PositionLeg,
                                   ProposedTrade, Side, TradeRecord)
 from catalyst.core.tradingcal import add_trading_days, sessions_in_range
 from catalyst.backtest import metrics as m
 from catalyst.backtest.montecarlo import probability_of_ruin
-from catalyst.index_vrp.engine import IndexVRPEngine, VRPPosition
+from catalyst.strategies.archive.index_vrp.engine import IndexVRPEngine, VRPPosition
 from catalyst.risk.manager import RiskManager
 
 logger = logging.getLogger(__name__)

@@ -1,0 +1,10 @@
+{
+  "data-folder": "data",
+  "algorithm-language": "Python",
+  "composer-dll-directory": ".",
+  "data-provider": "QuantConnect.Lean.Engine.DataFeeds.DefaultDataProvider",
+  "map-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskMapFileProvider",
+  "factor-file-provider": "QuantConnect.Data.Auxiliary.LocalDiskFactorFileProvider",
+  "job-user-id": "0",
+  "api-access-token": ""
+}

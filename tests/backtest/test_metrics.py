@@ -35,7 +35,7 @@ def test_monthly_stats_shape() -> None:
 def test_trade_stats() -> None:
     from datetime import date, datetime
 
-    from catalyst.core.models import Direction, TradeRecord
+    from catalyst.core.types import Direction, TradeRecord
 
     def tr(pnl: float) -> TradeRecord:
         return TradeRecord(

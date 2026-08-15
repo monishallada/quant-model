@@ -20,9 +20,9 @@ from pathlib import Path
 import pandas as pd
 
 from catalyst.core.config import load_config
-from catalyst.alpha.data import load_price_panel
-from catalyst.alpha.evaluation import evaluate_library
-from catalyst.alpha.signals import build_signal_panels
+from catalyst.strategies.archive.alpha.data import load_price_panel
+from catalyst.strategies.archive.alpha.evaluation import evaluate_library
+from catalyst.strategies.archive.alpha.signals import build_signal_panels
 
 logger = logging.getLogger(__name__)
 

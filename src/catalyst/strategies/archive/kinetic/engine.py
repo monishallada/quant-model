@@ -22,8 +22,8 @@ import logging
 from datetime import date, datetime
 
 from catalyst.core.config import KineticConfig, RiskConfig
-from catalyst.core.interfaces import Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import CatalystStrategy
+from catalyst.core.types import (
     Catalyst,
     Direction,
     ExitRules,
@@ -35,12 +35,12 @@ from catalyst.core.models import (
     Side,
     SignalResult,
 )
-from catalyst.kinetic.screener import KineticScreener
+from catalyst.strategies.archive.kinetic.screener import KineticScreener
 
 logger = logging.getLogger(__name__)
 
 
-class KineticIgnitionEngine(Strategy):
+class KineticIgnitionEngine(CatalystStrategy):
     name = "kinetic"
 
     def __init__(self, cfg: KineticConfig, risk: RiskConfig, screener: KineticScreener) -> None:
@@ -69,7 +69,7 @@ class KineticIgnitionEngine(Strategy):
             return None
         return min(candidates, key=lambda c: abs(c.key.strike - spot))
 
-    def required_expiries(
+    def catalyst_expiries(
         self, catalyst: Catalyst, available: list[date], as_of: date
     ) -> list[date] | None:
         expiry = self.select_expiry(available, as_of)

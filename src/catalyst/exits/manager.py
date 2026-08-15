@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from catalyst.core.models import OptionRight, Position
+from catalyst.core.types import OptionRight, Position
 from catalyst.core.tradingcal import add_trading_days, trading_days_between
 
 

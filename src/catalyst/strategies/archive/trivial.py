@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from catalyst.core.interfaces import Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import CatalystStrategy
+from catalyst.core.types import (
     Catalyst,
     Direction,
     ExitRules,
@@ -24,7 +24,7 @@ from catalyst.core.models import (
 )
 
 
-class TrivialTestStrategy(Strategy):
+class TrivialTestStrategy(CatalystStrategy):
     name = "trivial"
 
     def __init__(
@@ -47,7 +47,7 @@ class TrivialTestStrategy(Strategy):
         self._expiry_buffer = close_before_expiry_days
         self._entry_window = entry_days_before_catalyst
 
-    def required_expiries(
+    def catalyst_expiries(
         self, catalyst: Catalyst, available: list[date], as_of: date
     ) -> list[date] | None:
         after = [e for e in available if e >= catalyst.when.date()]

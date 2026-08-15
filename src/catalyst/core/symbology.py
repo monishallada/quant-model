@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from catalyst.core.models import OptionKey, OptionRight
+from catalyst.core.types import OptionKey, OptionRight
 
 _COMPACT_RE = re.compile(r"^([A-Z.]{1,6})(\d{6})([CP])(\d{8})$")
 

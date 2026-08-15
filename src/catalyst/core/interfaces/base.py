@@ -1,5 +1,8 @@
-"""Abstract interfaces that make identical strategy code run in backtest,
-paper, and live: only the injected DataSource/Broker implementations differ.
+"""DataSource, Broker and DirectionalSignal.
+
+Identical strategy code runs in backtest, paper and live because only the
+injected DataSource/Broker implementations differ. The Strategy contract lives
+in ``interfaces/strategy.py``.
 
 Architectural invariant (enforced across the codebase, see risk/manager.py):
 Strategy engines produce ``ProposedTrade`` objects and hold no Broker
@@ -15,7 +18,7 @@ from typing import Any
 
 import pandas as pd
 
-from catalyst.core.models import (
+from catalyst.core.types import (
     AccountState,
     Catalyst,
     Greeks,
@@ -105,30 +108,3 @@ class DirectionalSignal(ABC):
     def evaluate(
         self, symbol: str, history: pd.DataFrame, chain: OptionChain | None = None
     ) -> SignalResult: ...
-
-
-class Strategy(ABC):
-    """A strategy engine: turns (catalyst, chain, signal) into an unsized
-    ProposedTrade, or None when its entry gates are not met."""
-
-    name: str = "unnamed"
-
-    @abstractmethod
-    def evaluate(
-        self,
-        catalyst: Catalyst,
-        chain: OptionChain,
-        signal: SignalResult,
-        as_of: datetime,
-    ) -> ProposedTrade | None: ...
-
-    def required_expiries(
-        self, catalyst: Catalyst, available: list[date], as_of: date
-    ) -> list[date] | None:
-        """Expirations this engine could use for this catalyst right now.
-
-        Lets the backtester pull only the needed slices of a chain (historical
-        chain assembly costs terminal requests per expiration). None means
-        "no restriction" — the full config-horizon chain is fetched.
-        """
-        return None

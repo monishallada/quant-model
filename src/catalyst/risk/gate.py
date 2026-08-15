@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from catalyst.core.models import AccountState, Position, ProposedTrade
+from catalyst.core.types import AccountState, Position, ProposedTrade
 from catalyst.risk.sizing import fixed_fractional_units
 
 

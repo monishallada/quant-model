@@ -35,7 +35,7 @@ from collections import defaultdict
 import pandas as pd
 
 from catalyst.core.config import Config
-from catalyst.core.models import (
+from catalyst.core.types import (
     AccountState,
     BacktestResult,
     Direction,
@@ -55,8 +55,8 @@ from catalyst.backtest import metrics as m
 from catalyst.backtest.montecarlo import probability_of_ruin
 from catalyst.brokers.simulated import SimulatedBroker
 from catalyst.data.thetadata_historical import DataUnavailableError, ThetaDataHistorical
-from catalyst.engines.util import atm_contract
-from catalyst.archive.pairs.cointegration import CointegrationEngine, PairState
+from catalyst.core.chains import atm_contract
+from catalyst.strategies.archive.pairs.cointegration import CointegrationEngine, PairState
 from catalyst.risk.manager import RiskManager
 
 logger = logging.getLogger(__name__)

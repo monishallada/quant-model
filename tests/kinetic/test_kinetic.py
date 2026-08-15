@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from catalyst.core.config import CommissionsConfig, FillModelConfig, load_config
-from catalyst.core.models import (
+from catalyst.core.types import (
     OptionChain,
     OptionContract,
     OptionKey,
@@ -19,9 +19,9 @@ from catalyst.core.models import (
 )
 from catalyst.brokers.simulated import SimulatedBroker
 from catalyst.data.intraday import five_minute_candles
-from catalyst.kinetic.engine import KineticIgnitionEngine
-from catalyst.kinetic.exits import EmaTracker, KineticExitState
-from catalyst.kinetic.screener import KineticScreener
+from catalyst.strategies.archive.kinetic.engine import KineticIgnitionEngine
+from catalyst.strategies.archive.kinetic.exits import EmaTracker, KineticExitState
+from catalyst.strategies.archive.kinetic.screener import KineticScreener
 
 CFG = load_config("backtest")
 SESSION = date(2024, 2, 2)  # a Friday -> 0DTE weekly available
@@ -161,7 +161,7 @@ def test_selects_atm_strike_and_right() -> None:
 
 
 def test_proposal_requests_nav_fraction_and_prices_at_ask() -> None:
-    from catalyst.core.models import Catalyst, CatalystType, Direction
+    from catalyst.core.types import Catalyst, CatalystType, Direction
 
     engine = make_engine()
     chain = build_chain(111.0, [SESSION])
@@ -266,7 +266,7 @@ def test_entry_at_ask_exit_at_bid_with_flat_slippage() -> None:
                                      limit_price=2.10, tag="kinetic:TEST"))
     assert entry.avg_fill_price == pytest.approx(2.12)  # ask 2.10 + $0.02 slippage
 
-    from catalyst.core.models import OrderIntent
+    from catalyst.core.types import OrderIntent
 
     exit_result = broker.place_order(Order(
         legs=[OrderLeg(key=key, side=Side.SELL, qty=10)], limit_price=1.90,

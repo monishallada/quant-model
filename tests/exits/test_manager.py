@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from catalyst.core.models import ExitRules, OptionKey, OptionRight, Position, PositionLeg, Side
+from catalyst.core.types import ExitRules, OptionKey, OptionRight, Position, PositionLeg, Side
 from catalyst.exits.manager import evaluate_exits
 
 KEY = OptionKey(underlying="SPY", expiry=date(2024, 6, 21), right=OptionRight.CALL, strike=533.0)

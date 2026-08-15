@@ -12,8 +12,8 @@ import logging
 from datetime import date, datetime
 
 from catalyst.core.config import EngineBConfig, RiskConfig
-from catalyst.core.interfaces import Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import CatalystStrategy
+from catalyst.core.types import (
     Catalyst,
     Direction,
     ExitRules,
@@ -26,19 +26,19 @@ from catalyst.core.models import (
 )
 from catalyst.core.tradingcal import add_trading_days, trading_days_between
 from catalyst.data.catalysts import resolve_reaction_session
-from catalyst.engines.util import first_expiry_on_or_after, nearest_delta
+from catalyst.core.chains import first_expiry_on_or_after, nearest_delta
 
 logger = logging.getLogger(__name__)
 
 
-class EngineBCrushSpread(Strategy):
+class EngineBCrushSpread(CatalystStrategy):
     name = "engine_b"
 
     def __init__(self, cfg: EngineBConfig, risk: RiskConfig) -> None:
         self._cfg = cfg
         self._risk = risk
 
-    def required_expiries(
+    def catalyst_expiries(
         self, catalyst: Catalyst, available: list[date], as_of: date
     ) -> list[date] | None:
         days_out = trading_days_between(as_of, catalyst.when.date())

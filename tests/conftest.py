@@ -7,7 +7,7 @@ from datetime import date, datetime
 
 import pytest
 
-from catalyst.core.models import OptionChain, OptionContract, OptionKey, OptionRight
+from catalyst.core.types import OptionChain, OptionContract, OptionKey, OptionRight
 from catalyst.data.black_scholes import bs_greeks, bs_price
 
 

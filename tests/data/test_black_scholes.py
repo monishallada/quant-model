@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from catalyst.core.models import OptionRight
+from catalyst.core.types import OptionRight
 from catalyst.data.black_scholes import bs_greeks, bs_price, implied_vol
 
 

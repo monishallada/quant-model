@@ -33,7 +33,7 @@ from datetime import date, datetime, time, timedelta
 import pandas as pd
 
 from catalyst.core.config import Config, FillModelConfig
-from catalyst.core.models import (
+from catalyst.core.types import (
     AccountState,
     BacktestResult,
     Catalyst,
@@ -55,9 +55,9 @@ from catalyst.backtest.montecarlo import probability_of_ruin
 from catalyst.brokers.simulated import SimulatedBroker
 from catalyst.data.intraday import AlpacaMinuteBars, ThetaMinuteQuotes, five_minute_candles
 from catalyst.data.thetadata_historical import DataUnavailableError, ThetaDataHistorical
-from catalyst.kinetic.engine import KineticIgnitionEngine
-from catalyst.kinetic.exits import EmaTracker, KineticExitState
-from catalyst.kinetic.screener import KineticScreener, _parse_time
+from catalyst.strategies.archive.kinetic.engine import KineticIgnitionEngine
+from catalyst.strategies.archive.kinetic.exits import EmaTracker, KineticExitState
+from catalyst.strategies.archive.kinetic.screener import KineticScreener, _parse_time
 from catalyst.risk.manager import RiskManager
 
 logger = logging.getLogger(__name__)

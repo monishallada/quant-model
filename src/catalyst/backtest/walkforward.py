@@ -15,7 +15,7 @@ from typing import Callable
 from dateutil.relativedelta import relativedelta
 
 from catalyst.core.config import WalkForwardConfig
-from catalyst.core.models import BacktestResult
+from catalyst.core.types import BacktestResult
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,26 @@ def run_walk_forward(
 
 
 def chronological_split(start: date, end: date, train_fraction: float) -> tuple[date, date]:
-    """(train_end, test_start) boundary for the configured chronological split."""
+    """(train_end, test_start) for the LEGACY split — both are the same date.
+
+    Callers run train as [start, boundary] and test as [boundary, end], so the
+    boundary session belongs to BOTH segments: a one-session overlap out of
+    ~2160. Left exactly as-is so every archived campaign reproduces its
+    original numbers. New work should use ``chronological_split_exclusive``.
+    """
     span_days = (end - start).days
     boundary = start + relativedelta(days=int(span_days * train_fraction))
     return boundary, boundary
+
+
+def chronological_split_exclusive(
+    start: date, end: date, train_fraction: float
+) -> tuple[date, date]:
+    """Non-overlapping (train_end, test_start): test begins the day AFTER train ends.
+
+    Same 70/30 proportion and the same cut point; the only difference is that
+    the boundary session is no longer counted twice. This is what the shared
+    pipeline uses, so no future strategy inherits the overlap.
+    """
+    boundary, _ = chronological_split(start, end, train_fraction)
+    return boundary, boundary + relativedelta(days=1)

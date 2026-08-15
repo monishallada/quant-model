@@ -34,9 +34,9 @@ from datetime import date, datetime, time
 import pandas as pd
 
 from catalyst.core.config import IndexVRPConfig
-from catalyst.core.models import OptionChain, OptionContract, OptionRight
+from catalyst.core.types import OptionChain, OptionContract, OptionRight
 from catalyst.data.thetadata_historical import DataUnavailableError, ThetaDataHistorical
-from catalyst.engines.util import nearest_delta, quotable
+from catalyst.core.chains import nearest_delta, quotable
 
 logger = logging.getLogger(__name__)
 

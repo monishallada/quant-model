@@ -13,8 +13,8 @@ import logging
 from datetime import date, datetime
 
 from catalyst.core.config import EngineCConfig, RiskConfig
-from catalyst.core.interfaces import Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import CatalystStrategy
+from catalyst.core.types import (
     Catalyst,
     CatalystType,
     Direction,
@@ -29,12 +29,12 @@ from catalyst.core.models import (
 from catalyst.core.tradingcal import trading_days_between
 from catalyst.data.catalysts import resolve_reaction_session
 from catalyst.data.iv_history import IVRankProvider
-from catalyst.engines.util import nearest_delta
+from catalyst.core.chains import nearest_delta
 
 logger = logging.getLogger(__name__)
 
 
-class EngineCPead(Strategy):
+class EngineCPead(CatalystStrategy):
     name = "engine_c"
 
     def __init__(self, cfg: EngineCConfig, risk: RiskConfig, iv_rank: IVRankProvider) -> None:
@@ -46,7 +46,7 @@ class EngineCPead(Strategy):
         lo_w, hi_w = self._cfg.expiry_weeks
         return lo_w * 7, hi_w * 7
 
-    def required_expiries(
+    def catalyst_expiries(
         self, catalyst: Catalyst, available: list[date], as_of: date
     ) -> list[date] | None:
         if catalyst.type is not CatalystType.EARNINGS:

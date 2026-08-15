@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from catalyst.core.config import Config, load_config
-from catalyst.core.models import BacktestResult
+from catalyst.core.types import BacktestResult
 from catalyst.backtest import metrics as m
 from catalyst.backtest.backtester import Backtester
 from catalyst.backtest.walkforward import chronological_split
@@ -31,8 +31,8 @@ from catalyst.data.catalysts import YFinanceEarnings
 from catalyst.data.intraday import AlpacaMinuteBars
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.drift.engine import DriftHarvestEngine
-from catalyst.drift.screener import DriftScreener
+from catalyst.strategies.archive.drift.engine import DriftHarvestEngine
+from catalyst.strategies.archive.drift.screener import DriftScreener
 from catalyst.risk.manager import RiskManager
 from catalyst.signals.neutral import NeutralSignal
 

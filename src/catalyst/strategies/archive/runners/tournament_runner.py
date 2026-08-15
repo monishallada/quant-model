@@ -13,10 +13,10 @@ from pathlib import Path
 import pandas as pd
 
 from catalyst.core.config import load_config
-from catalyst.alpha.data import load_price_panel
-from catalyst.alpha.signals import build_signal_panels, cross_sectional_zscore
-from catalyst.tournament.engine import TournamentConfig, run_tournament_path
-from catalyst.tournament.objective import evaluate_paths, rolling_windows
+from catalyst.strategies.archive.alpha.data import load_price_panel
+from catalyst.strategies.archive.alpha.signals import build_signal_panels, cross_sectional_zscore
+from catalyst.strategies.archive.tournament.engine import TournamentConfig, run_tournament_path
+from catalyst.strategies.archive.tournament.objective import evaluate_paths, rolling_windows
 
 logger = logging.getLogger(__name__)
 

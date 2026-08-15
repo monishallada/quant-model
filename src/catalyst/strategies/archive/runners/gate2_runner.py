@@ -20,7 +20,7 @@ from pathlib import Path
 
 from catalyst.core.config import Config, load_config
 from catalyst.core.interfaces import DirectionalSignal, Strategy
-from catalyst.core.models import BacktestResult, Catalyst
+from catalyst.core.types import BacktestResult, Catalyst
 from catalyst.backtest.backtester import Backtester
 from catalyst.backtest.walkforward import chronological_split
 from catalyst.data.alpaca_history import AlpacaDailyBars
@@ -29,11 +29,11 @@ from catalyst.data.catalysts import StaticEconomicCalendar, YFinanceEarnings
 from catalyst.data.iv_history import IVRankProvider
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.archive.engines.engine_a_convexity import EngineAConvexity
-from catalyst.archive.engines.engine_b_crush_spread import EngineBCrushSpread
-from catalyst.archive.engines.engine_c_pead import EngineCPead
+from catalyst.strategies.archive.engines.engine_a_convexity import EngineAConvexity
+from catalyst.strategies.archive.engines.engine_b_crush_spread import EngineBCrushSpread
+from catalyst.strategies.archive.engines.engine_c_pead import EngineCPead
 from catalyst.risk.gate import FixedFractionalGate
-from catalyst.archive.runners.backtest_runner import format_result
+from catalyst.strategies.archive.runners.backtest_runner import format_result
 from catalyst.signals.mean_reversion import MeanReversionSignal
 from catalyst.signals.neutral import NeutralSignal
 from catalyst.signals.trend import TrendSignal

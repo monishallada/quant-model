@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from catalyst.core.config import load_config
-from catalyst.core.models import (
+from catalyst.core.types import (
     Catalyst,
     CatalystType,
     Direction,
@@ -20,8 +20,8 @@ from catalyst.core.models import (
     PositionLeg,
     Side,
 )
-from catalyst.drift.engine import DriftHarvestEngine
-from catalyst.drift.screener import DriftScreener, realized_vol
+from catalyst.strategies.archive.drift.engine import DriftHarvestEngine
+from catalyst.strategies.archive.drift.screener import DriftScreener, realized_vol
 from catalyst.exits.manager import evaluate_exits
 from tests.conftest import build_chain
 
@@ -264,7 +264,7 @@ def test_premium_at_risk_uses_max_loss_for_credit_positions() -> None:
 
 
 def test_risk_manager_sizes_credit_spread_on_max_loss() -> None:
-    from catalyst.core.models import AccountState, OrderLeg, ProposedTrade
+    from catalyst.core.types import AccountState, OrderLeg, ProposedTrade
     from catalyst.risk.manager import RiskManager
 
     key = OptionKey(underlying="TEST", expiry=EXPIRY, right=OptionRight.PUT, strike=100.0)

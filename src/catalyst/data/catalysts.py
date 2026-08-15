@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from catalyst.core.config import FMPConfig
-from catalyst.core.models import Catalyst, CatalystType
+from catalyst.core.types import Catalyst, CatalystType
 from catalyst.data.cache import ParquetCache
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,7 @@ from __future__ import annotations
 import pandas as pd
 
 from catalyst.core.interfaces import DirectionalSignal
-from catalyst.core.models import Direction, OptionChain, SignalResult
+from catalyst.core.types import Direction, OptionChain, SignalResult
 
 
 class NeutralSignal(DirectionalSignal):

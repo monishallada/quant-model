@@ -104,7 +104,7 @@ def trailing_ic_weights(
     Uses non-overlapping samples inside the window for the same reason the
     diagnostic does: overlapping windows make noise look like skill.
     """
-    from catalyst.alpha.evaluation import forward_returns, information_coefficient
+    from catalyst.strategies.archive.alpha.evaluation import forward_returns, information_coefficient
 
     start = asof - pd.Timedelta(days=window_days)
     # The forward return for date d needs prices through d+horizon, so the last

@@ -20,7 +20,7 @@ from datetime import date
 from pathlib import Path
 
 from catalyst.core.config import Config, load_config
-from catalyst.core.models import BacktestResult
+from catalyst.core.types import BacktestResult
 from catalyst.backtest import metrics as m
 from catalyst.backtest.walkforward import chronological_split, walk_forward_windows
 from catalyst.data.cache import ParquetCache
@@ -28,7 +28,7 @@ from catalyst.data.catalysts import YFinanceEarnings
 from catalyst.data.intraday import AlpacaMinuteBars, ThetaMinuteQuotes
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.kinetic.backtester import KineticBacktester
+from catalyst.strategies.archive.kinetic.backtester import KineticBacktester
 
 logger = logging.getLogger(__name__)
 

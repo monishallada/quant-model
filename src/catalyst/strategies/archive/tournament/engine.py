@@ -43,7 +43,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from catalyst.core.models import OptionRight
+from catalyst.core.types import OptionRight
 from catalyst.data.black_scholes import bs_price
 
 logger = logging.getLogger(__name__)

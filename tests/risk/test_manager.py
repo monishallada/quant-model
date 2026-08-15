@@ -10,7 +10,7 @@ from datetime import date, datetime
 import pandas as pd
 
 from catalyst.core.config import load_config
-from catalyst.core.models import (
+from catalyst.core.types import (
     AccountState,
     Direction,
     ExitRules,

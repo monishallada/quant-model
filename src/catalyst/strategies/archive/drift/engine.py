@@ -29,8 +29,8 @@ from datetime import date, datetime
 from typing import Literal
 
 from catalyst.core.config import DriftConfig, RiskConfig
-from catalyst.core.interfaces import Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import CatalystStrategy
+from catalyst.core.types import (
     Catalyst,
     CatalystType,
     Direction,
@@ -45,8 +45,8 @@ from catalyst.core.models import (
 )
 from catalyst.core.tradingcal import add_trading_days
 from catalyst.data.catalysts import resolve_reaction_session
-from catalyst.drift.screener import DriftScreener
-from catalyst.engines.util import nearest_delta, quotable
+from catalyst.strategies.archive.drift.screener import DriftScreener
+from catalyst.core.chains import nearest_delta, quotable
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _wing(chain: OptionChain, expiry: date, right: OptionRight, short_strike: fl
     return min(candidates, key=lambda c: abs(c.key.strike - target))
 
 
-class DriftHarvestEngine(Strategy):
+class DriftHarvestEngine(CatalystStrategy):
     def __init__(self, cfg: DriftConfig, risk: RiskConfig, screener: DriftScreener,
                  arm: Arm = "credit") -> None:
         self._cfg = cfg
@@ -90,7 +90,7 @@ class DriftHarvestEngine(Strategy):
         target = (lo + hi) / 2.0
         return min(eligible, key=lambda e: abs((e - session).days - target))
 
-    def required_expiries(
+    def catalyst_expiries(
         self, catalyst: Catalyst, available: list[date], as_of: date
     ) -> list[date] | None:
         if catalyst.type is not CatalystType.EARNINGS:

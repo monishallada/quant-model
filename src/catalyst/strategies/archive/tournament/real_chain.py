@@ -19,10 +19,10 @@ from datetime import date, datetime, time
 
 import pandas as pd
 
-from catalyst.core.models import OptionRight
+from catalyst.core.types import OptionRight
 from catalyst.data.thetadata_historical import DataUnavailableError, ThetaDataHistorical
-from catalyst.engines.util import quotable
-from catalyst.tournament.engine import TournamentConfig
+from catalyst.core.chains import quotable
+from catalyst.strategies.archive.tournament.engine import TournamentConfig
 
 logger = logging.getLogger(__name__)
 

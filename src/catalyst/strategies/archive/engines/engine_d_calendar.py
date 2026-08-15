@@ -14,8 +14,8 @@ import logging
 from datetime import date, datetime, timedelta
 
 from catalyst.core.config import EngineDConfig, RiskConfig
-from catalyst.core.interfaces import Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import CatalystStrategy
+from catalyst.core.types import (
     Catalyst,
     Direction,
     ExitRules,
@@ -28,14 +28,14 @@ from catalyst.core.models import (
 )
 from catalyst.core.tradingcal import add_trading_days, trading_days_between
 from catalyst.data.catalysts import resolve_reaction_session
-from catalyst.engines.util import atm_contract, first_expiry_on_or_after
+from catalyst.core.chains import atm_contract, first_expiry_on_or_after
 
 logger = logging.getLogger(__name__)
 
 _BACK_MONTH_TARGET_DAYS = 30  # back leg ~1 month behind the front leg
 
 
-class EngineDCalendar(Strategy):
+class EngineDCalendar(CatalystStrategy):
     name = "engine_d"
 
     def __init__(self, cfg: EngineDConfig, risk: RiskConfig) -> None:
@@ -55,7 +55,7 @@ class EngineDCalendar(Strategy):
             return None
         return front, back
 
-    def required_expiries(
+    def catalyst_expiries(
         self, catalyst: Catalyst, available: list[date], as_of: date
     ) -> list[date] | None:
         days_out = trading_days_between(as_of, catalyst.when.date())

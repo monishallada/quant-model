@@ -13,7 +13,7 @@ from catalyst.data.cache import ParquetCache
 from catalyst.data.intraday import AlpacaMinuteBars
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.persymbol.lab import buy_and_hold, covered_calls, put_credit_spreads
+from catalyst.strategies.archive.persymbol_lab.lab import buy_and_hold, covered_calls, put_credit_spreads
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,7 @@ from catalyst.data.cache import ParquetCache
 from catalyst.data.intraday import AlpacaMinuteBars
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.index_vrp.backtester import run_index_vrp
+from catalyst.strategies.archive.index_vrp.backtester import run_index_vrp
 
 logger = logging.getLogger(__name__)
 

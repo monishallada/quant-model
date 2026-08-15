@@ -17,6 +17,9 @@ dependencies = [
     "yfinance>=1.5.2",
     "lxml>=6.1.1",
     "statsmodels>=0.14.6",
+    "py-vollib-vectorized>=0.1.1",
+    "nautilus-trader>=1.231.0",
+    "lean>=1.0.228",
 ]
 
 [dependency-groups]

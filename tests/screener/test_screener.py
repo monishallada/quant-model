@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from catalyst.core.config import load_config
-from catalyst.core.models import Catalyst, CatalystType
+from catalyst.core.types import Catalyst, CatalystType
 from catalyst.screener.catalyst_screener import CatalystScreener
 from tests.conftest import build_chain
 

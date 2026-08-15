@@ -29,10 +29,10 @@ from datetime import date
 import pandas as pd
 
 from catalyst.core.config import DriftConfig
-from catalyst.core.models import Catalyst, OptionChain, OptionRight
+from catalyst.core.types import Catalyst, OptionChain, OptionRight
 from catalyst.core.tradingcal import trading_days_between
 from catalyst.data.catalysts import resolve_reaction_session
-from catalyst.engines.util import atm_contract
+from catalyst.core.chains import atm_contract
 
 logger = logging.getLogger(__name__)
 

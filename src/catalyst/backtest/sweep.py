@@ -16,7 +16,7 @@ from typing import Any, Callable, Iterator
 import pandas as pd
 
 from catalyst.core.config import SweepConfig
-from catalyst.core.models import BacktestResult
+from catalyst.core.types import BacktestResult
 
 
 def iter_combinations(cfg: SweepConfig, seed: int = 11) -> Iterator[dict[str, Any]]:

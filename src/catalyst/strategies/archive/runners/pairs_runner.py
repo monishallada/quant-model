@@ -24,15 +24,15 @@ from pathlib import Path
 import pandas as pd
 
 from catalyst.core.config import Config, load_config
-from catalyst.core.models import BacktestResult
+from catalyst.core.types import BacktestResult
 from catalyst.backtest.walkforward import chronological_split, walk_forward_windows
 from catalyst.data.alpaca_history import AlpacaDailyBars
 from catalyst.data.cache import ParquetCache
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.archive.pairs.options_backtester import PairsOptionsBacktester
-from catalyst.archive.pairs.shares_backtester import PairsSharesBacktester
-from catalyst.archive.runners.backtest_runner import format_result
+from catalyst.strategies.archive.pairs.options_backtester import PairsOptionsBacktester
+from catalyst.strategies.archive.pairs.shares_backtester import PairsSharesBacktester
+from catalyst.strategies.archive.runners.backtest_runner import format_result
 
 logger = logging.getLogger(__name__)
 

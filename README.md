@@ -10,19 +10,43 @@ return figure or relaxes risk in response to underperformance. All orders pass t
 
 ## Architecture
 
-Identical strategy code runs in backtest, paper, and live — only the injected `DataSource`
-and `Broker` implementations differ:
+A stable shared core; swappable strategies. Every strategy — active or archived —
+implements one `Strategy` interface and travels one fixed pipeline:
 
-| Environment | DataSource            | Broker            |
-|-------------|-----------------------|-------------------|
-| backtest    | `ThetaDataHistorical` | `SimulatedBroker` |
-| paper       | `LiveDataSource`      | `AlpacaBroker`    |
-| live        | `LiveDataSource`      | `AlpacaBroker` → `SchwabBroker` (post-validation) |
+```
+screener → strategy → RiskManager → cost model → exits → metrics → report
+```
 
-Pipeline: screener → engines (A convexity / B crush-spread / C PEAD / D calendar)
-→ directional signal → **RiskManager** (three-tier allocation, caps, breakers — authoritative)
-→ execution (limit-only discipline) → broker adapter. Exits are mechanical rules attached
-to every position at entry.
+There is no flag or config key that removes a stage, and the pipeline calls the
+strategy rather than the reverse. A strategy holds no Broker, no RiskManager and
+no cost model, so it cannot size its own position, price its own fill, or skip
+the out-of-sample split — those are absent from its type signatures.
+
+```
+config/                  YAML only; no numbers in code
+core/interfaces/         DataSource, Broker, Strategy, DirectionalSignal
+core/types/              OptionChain, Greeks, Order, Position, BacktestResult...
+data/  brokers/  screener/  risk/  execution/  exits/
+costs/                   single source of cost truth — every fill priced here
+backtest/                backtester, pipeline, walk-forward, metrics
+reporting/               the standard report; strategies cannot opt out of a check
+strategies/active/       exactly one strategy under test
+strategies/archive/      every prior campaign, kept runnable with its results
+observability/           kill switch, heartbeat, JSON logging
+runners/                 backtest, deploy, archive
+```
+
+Identical strategy code runs in backtest, paper and live — `--mode` changes only
+which `DataSource` and `Broker` are injected:
+
+| Mode | DataSource | Broker | Gate |
+|---|---|---|---|
+| `backtest` | `ThetaDataHistorical` | `SimulatedBroker` | none |
+| `paper` | live | `AlpacaBroker` (paper endpoint) | typed `yes` |
+| `live` | live | `SchwabBroker` | validated **and** paper-tested, then typed `LIVE` |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for adding a strategy, archiving, the
+pipeline guarantees, and the deployment path.
 
 ## Setup
 

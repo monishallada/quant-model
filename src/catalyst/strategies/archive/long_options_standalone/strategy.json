@@ -1,0 +1,20 @@
+{
+  "name": "long_options_standalone",
+  "module": "catalyst.strategies.archive.long_options_standalone.engine",
+  "status": "archived",
+  "date_tested": "2026-08-15",
+  "verdict": "First options structure with a real right tail (TSLA P(10x)=7.3%), but no alpha: calls-only beat signal-directed in all 12 paired configs. Measured WITHOUT commissions or slippage and without the RiskManager.",
+  "avg_monthly_return": 0.0098,
+  "baseline_annual": 0.01,
+  "validated": false,
+  "paper_tested": false,
+  "notes": "Reference implementation retained so the reported v9 numbers stay reproducible. Superseded by strategies/active/long_options.py, which routes the identical selection logic through the shared risk and cost layers.",
+  "key_metrics": {
+    "positions": 785,
+    "mean_multiple": 1.131,
+    "median_multiple": 0.462,
+    "win_rate": 0.348,
+    "tsla_p10x": 0.073,
+    "portfolio_best_avg_monthly": 0.0374
+  }
+}

@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from catalyst.core.models import MonthlyReturnStats, TradeRecord
+from catalyst.core.types import MonthlyReturnStats, TradeRecord
 
 TRADING_DAYS_PER_YEAR = 252
 _HISTOGRAM_BINS = 20
@@ -86,7 +86,15 @@ def avg_monthly_return(equity: pd.Series) -> float:
     """
     if len(equity) < 2 or equity.iloc[0] <= 0 or equity.iloc[-1] <= 0:
         return 0.0
-    months = len(equity) / (TRADING_DAYS_PER_YEAR / 12.0)
+    # Elapsed time comes from the DATES when we have them, never from the row
+    # count. A curve marked only at exits has ~16 rows across a year; reading
+    # that as 16 trading days turns a +10% year into "+12.8% per month". Row
+    # count is only a fallback for curves with no date index.
+    idx = equity.index
+    if isinstance(idx, pd.DatetimeIndex) and len(idx) > 1:
+        months = (idx[-1] - idx[0]).days / (365.25 / 12.0)
+    else:
+        months = len(equity) / (TRADING_DAYS_PER_YEAR / 12.0)
     if months <= 0:
         return 0.0
     return float((equity.iloc[-1] / equity.iloc[0]) ** (1.0 / months) - 1.0)

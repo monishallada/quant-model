@@ -5,7 +5,7 @@ from datetime import date, datetime
 import pytest
 
 from catalyst.core.config import CommissionsConfig, FillModelConfig
-from catalyst.core.models import (
+from catalyst.core.types import (
     OptionChain,
     OptionContract,
     OptionKey,

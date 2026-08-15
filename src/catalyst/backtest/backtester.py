@@ -23,8 +23,9 @@ from typing import Sequence
 import pandas as pd
 
 from catalyst.core.config import Config
-from catalyst.core.interfaces import DataSource, DirectionalSignal, Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import (Cadence, DataSource, DirectionalSignal,
+                                     Opportunity, Strategy, StrategyContext)
+from catalyst.core.types import (
     BacktestResult,
     Catalyst,
     Direction,
@@ -148,6 +149,9 @@ class Backtester:
             self._process_entries(
                 broker, chains, history, catalysts_by_symbol, open_state, trades, at
             )
+            self._process_scheduled_entries(
+                broker, chains, history, open_state, trades, at
+            )
 
             equity = broker.get_account().equity
             equity_curve[session] = equity
@@ -191,6 +195,23 @@ class Backtester:
                 if leg.key.expiry >= session:
                     needed[pos.underlying].add(leg.key.expiry)
 
+        # Non-catalyst strategies (SCHEDULED / DAILY) enumerate their own work,
+        # so the pipeline asks them what to fetch. opportunities() is deliberately
+        # chain-free: it answers "what would you look at today", which must not
+        # require paying for a chain to find out.
+        for strat in self._strategies:
+            if strat.cadence is Cadence.CATALYST:
+                continue
+            probe = StrategyContext(as_of=at, data=self._data)
+            for opp in strat.opportunities(session, probe):
+                for sym in opp.symbols:
+                    available = [e for e in self._data.list_expirations(sym) if e > session]
+                    req = strat.required_expiries(opp, available, session)
+                    if req:
+                        needed[sym].update(req)
+                    elif available:
+                        needed[sym].add(available[0])
+
         for sym, cat_list in catalysts_by_symbol.items():
             in_play = self._catalysts_in_play(cat_list, session)
             if not in_play:
@@ -204,12 +225,16 @@ class Backtester:
                         e for e in available if e >= resolve_reaction_session(catalyst)
                     ]
                     if event_expiries and any(
-                        strat.required_expiries(catalyst, available, session)
+                        strat.required_expiries(
+                            Opportunity(session=session, symbols=(sym,), catalyst=catalyst),
+                            available, session)
                         for strat in self._strategies
                     ):
                         needed[sym].add(event_expiries[0])
                 for strat in self._strategies:
-                    req = strat.required_expiries(catalyst, available, session)
+                    req = strat.required_expiries(
+                            Opportunity(session=session, symbols=(sym,), catalyst=catalyst),
+                            available, session)
                     if req is None:
                         horizon_needed = [
                             e for e in available
@@ -409,14 +434,54 @@ class Backtester:
             for catalyst in in_play:
                 if not self._passes_screener(catalyst, chain, at):
                     continue
+                ctx = StrategyContext(as_of=at, data=self._data, signal=signal,
+                                      history=history, chains={sym: chain})
+                opp = Opportunity(session=session, symbols=(sym,), catalyst=catalyst)
                 for strat in self._strategies:
                     if (strat.name, catalyst.ref) in already:
                         continue
-                    proposal = strat.evaluate(catalyst, chain, signal, at)
+                    # plan(), never evaluate() directly: the pipeline calls the
+                    # strategy, so there is no path for a strategy to reach the
+                    # broker, the risk layer or the cost model.
+                    proposal = strat.plan(opp, ctx)
                     if proposal is None:
                         continue
                     self._enter(broker, proposal, open_state, at)
                     already.add((strat.name, catalyst.ref))
+
+    def _process_scheduled_entries(
+        self,
+        broker: SimulatedBroker,
+        chains: dict[str, OptionChain],
+        history: dict[str, pd.DataFrame],
+        open_state: dict[str, _OpenTradeState],
+        trades: list[TradeRecord],
+        at: datetime,
+    ) -> None:
+        """SCHEDULED / DAILY strategies. Identical downstream path to catalyst
+        entries: plan() -> risk gate -> cost model -> exits. Only the way the
+        opportunity was discovered differs."""
+        session = at.date()
+        open_refs = {(st.engine, st.catalyst_ref) for st in open_state.values()}
+
+        for strat in self._strategies:
+            if strat.cadence is Cadence.CATALYST:
+                continue
+            probe = StrategyContext(as_of=at, data=self._data, history=history, chains=chains)
+            for opp in strat.opportunities(session, probe):
+                sym = opp.symbol
+                if sym not in chains:
+                    continue
+                signal = self._signal_for(sym, history, session, chains[sym])
+                ctx = StrategyContext(as_of=at, data=self._data, signal=signal,
+                                      history=history, chains=chains)
+                proposal = strat.plan(opp, ctx)
+                if proposal is None:
+                    continue
+                if (proposal.engine, proposal.catalyst_ref) in open_refs:
+                    continue
+                self._enter(broker, proposal, open_state, at)
+                open_refs.add((proposal.engine, proposal.catalyst_ref))
 
     def _passes_screener(self, catalyst: Catalyst, chain: OptionChain, at: datetime) -> bool:
         """Screener gates PRE-event entries (implied move + liquidity). Post-

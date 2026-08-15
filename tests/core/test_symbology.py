@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from catalyst.core.models import OptionKey, OptionRight
+from catalyst.core.types import OptionKey, OptionRight
 from catalyst.core.symbology import parse_osi, to_alpaca_symbol, to_osi, to_schwab_symbol
 
 AAPL_CALL = OptionKey(

@@ -13,8 +13,8 @@ import logging
 from datetime import date, datetime
 
 from catalyst.core.config import EngineAConfig, RiskConfig
-from catalyst.core.interfaces import Strategy
-from catalyst.core.models import (
+from catalyst.core.interfaces import CatalystStrategy
+from catalyst.core.types import (
     Catalyst,
     Direction,
     ExitRules,
@@ -28,12 +28,12 @@ from catalyst.core.models import (
 from catalyst.core.tradingcal import add_trading_days, trading_days_between
 from catalyst.data.catalysts import resolve_reaction_session
 from catalyst.data.iv_history import IVRankProvider
-from catalyst.engines.util import nearest_delta
+from catalyst.core.chains import nearest_delta
 
 logger = logging.getLogger(__name__)
 
 
-class EngineAConvexity(Strategy):
+class EngineAConvexity(CatalystStrategy):
     name = "engine_a"
 
     def __init__(self, cfg: EngineAConfig, risk: RiskConfig, iv_rank: IVRankProvider) -> None:
@@ -50,7 +50,7 @@ class EngineAConvexity(Strategy):
         lo_frac, hi_frac = self._cfg.catalyst_life_fraction
         return t_cat / hi_frac, t_cat / lo_frac
 
-    def required_expiries(
+    def catalyst_expiries(
         self, catalyst: Catalyst, available: list[date], as_of: date
     ) -> list[date] | None:
         # Only request chain data on days inside the entry window — historical

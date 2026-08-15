@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from catalyst.core.config import ScreenerConfig
-from catalyst.core.models import Catalyst, OptionChain, OptionContract, OptionRight
+from catalyst.core.types import Catalyst, OptionChain, OptionContract, OptionRight
 from catalyst.data.catalysts import resolve_reaction_session
 
 logger = logging.getLogger(__name__)

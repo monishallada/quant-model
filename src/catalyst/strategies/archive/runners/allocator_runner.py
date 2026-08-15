@@ -13,17 +13,17 @@ from pathlib import Path
 import pandas as pd
 
 from catalyst.core.config import load_config
-from catalyst.alpha.data import load_price_panel
-from catalyst.alpha.portfolio import PortfolioConfig, run_portfolio_backtest
-from catalyst.alpha.signals import build_signal_panels
-from catalyst.allocator.combined import (AllocatorConfig, combine_sleeves, to_daily_returns)
+from catalyst.strategies.archive.alpha.data import load_price_panel
+from catalyst.strategies.archive.alpha.portfolio import PortfolioConfig, run_portfolio_backtest
+from catalyst.strategies.archive.alpha.signals import build_signal_panels
+from catalyst.strategies.archive.allocator.combined import (AllocatorConfig, combine_sleeves, to_daily_returns)
 from catalyst.backtest import metrics as m
 from catalyst.data.cache import ParquetCache
 from catalyst.data.thetadata_client import ThetaDataClient
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.tournament.engine import TournamentConfig
-from catalyst.tournament.real_chain import run_real_chain_path
-from catalyst.archive.runners.tournament_runner import composite_signal
+from catalyst.strategies.archive.tournament.engine import TournamentConfig
+from catalyst.strategies.archive.tournament.real_chain import run_real_chain_path
+from catalyst.strategies.archive.runners.tournament_runner import composite_signal
 
 logger = logging.getLogger(__name__)
 

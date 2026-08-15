@@ -25,7 +25,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from catalyst.core.config import RiskConfig
-from catalyst.core.models import AccountState, Position, ProposedTrade
+from catalyst.core.types import AccountState, Position, ProposedTrade
 from catalyst.risk.gate import GateDecision
 from catalyst.risk.sizing import fixed_fractional_units
 

@@ -7,7 +7,7 @@ from datetime import date, datetime
 import pytest
 
 from catalyst.core.config import load_config
-from catalyst.core.models import (
+from catalyst.core.types import (
     Catalyst,
     CatalystType,
     Direction,
@@ -15,10 +15,10 @@ from catalyst.core.models import (
     Side,
     SignalResult,
 )
-from catalyst.archive.engines.engine_a_convexity import EngineAConvexity
-from catalyst.archive.engines.engine_b_crush_spread import EngineBCrushSpread
-from catalyst.archive.engines.engine_c_pead import EngineCPead
-from catalyst.archive.engines.engine_d_calendar import EngineDCalendar
+from catalyst.strategies.archive.engines.engine_a_convexity import EngineAConvexity
+from catalyst.strategies.archive.engines.engine_b_crush_spread import EngineBCrushSpread
+from catalyst.strategies.archive.engines.engine_c_pead import EngineCPead
+from catalyst.strategies.archive.engines.engine_d_calendar import EngineDCalendar
 from tests.conftest import FakeIVRank, build_chain
 
 CFG = load_config("backtest")

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 
-from catalyst.core.models import Greeks, OptionRight
+from catalyst.core.types import Greeks, OptionRight
 
 _SQRT_2PI = math.sqrt(2.0 * math.pi)
 

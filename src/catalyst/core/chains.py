@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from catalyst.core.models import OptionChain, OptionContract, OptionRight
+from catalyst.core.types import OptionChain, OptionContract, OptionRight
 
 
 def quotable(contracts: list[OptionContract]) -> list[OptionContract]:

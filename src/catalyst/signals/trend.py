@@ -12,7 +12,7 @@ import pandas as pd
 
 from catalyst.core.config import TrendSignalConfig
 from catalyst.core.interfaces import DirectionalSignal
-from catalyst.core.models import Direction, OptionChain, SignalResult
+from catalyst.core.types import Direction, OptionChain, SignalResult
 
 
 class TrendSignal(DirectionalSignal):

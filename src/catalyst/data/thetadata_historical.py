@@ -23,7 +23,7 @@ import pandas as pd
 
 from catalyst.core.config import DataConfig
 from catalyst.core.interfaces import DataSource
-from catalyst.core.models import (
+from catalyst.core.types import (
     Catalyst,
     Greeks,
     OptionChain,

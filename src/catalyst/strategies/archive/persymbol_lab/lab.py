@@ -32,9 +32,9 @@ from datetime import date, datetime, time
 import pandas as pd
 
 from catalyst.core.config import PerSymbolConfig
-from catalyst.core.models import OptionRight
+from catalyst.core.types import OptionRight
 from catalyst.data.thetadata_historical import DataUnavailableError, ThetaDataHistorical
-from catalyst.engines.util import nearest_delta, quotable
+from catalyst.core.chains import nearest_delta, quotable
 from catalyst.backtest import metrics as m
 
 logger = logging.getLogger(__name__)

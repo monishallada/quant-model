@@ -26,7 +26,7 @@ from typing import Any
 import yaml
 
 from catalyst.core.config import Config, load_config
-from catalyst.core.models import BacktestResult
+from catalyst.core.types import BacktestResult
 from catalyst.backtest.backtester import Backtester
 from catalyst.backtest.sweep import iter_combinations
 from catalyst.backtest.walkforward import chronological_split, walk_forward_windows
@@ -38,8 +38,8 @@ from catalyst.data.thetadata_historical import ThetaDataHistorical
 from catalyst.risk.hedge import HedgeManager
 from catalyst.risk.manager import RiskManager
 from catalyst.screener.catalyst_screener import CatalystScreener
-from catalyst.archive.runners.backtest_runner import format_result
-from catalyst.archive.runners.gate2_runner import build_engine, build_signal, load_catalysts
+from catalyst.strategies.archive.runners.backtest_runner import format_result
+from catalyst.strategies.archive.runners.gate2_runner import build_engine, build_signal, load_catalysts
 
 logger = logging.getLogger(__name__)
 

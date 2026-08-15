@@ -18,14 +18,14 @@ from datetime import date
 from pathlib import Path
 
 from catalyst.core.config import load_config
-from catalyst.core.models import BacktestResult
+from catalyst.core.types import BacktestResult
 from catalyst.backtest.backtester import Backtester
 from catalyst.backtest.synthetic import weekly_synthetic_catalysts
 from catalyst.backtest.walkforward import chronological_split
 from catalyst.data.alpaca_history import AlpacaDailyBars
 from catalyst.data.cache import ParquetCache
 from catalyst.data.thetadata_historical import ThetaDataHistorical
-from catalyst.engines.trivial import TrivialTestStrategy
+from catalyst.strategies.archive.trivial import TrivialTestStrategy
 from catalyst.risk.gate import FixedFractionalGate
 from catalyst.signals.neutral import NeutralSignal
 

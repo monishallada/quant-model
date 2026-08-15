@@ -28,7 +28,36 @@ Measured avg monthly return, real costs, full period:
 | v2 Pairs V1 — shares | SHARES | −0.07% |
 | v8 Index VRP — SPY/QQQ put credit spreads | OPTIONS | +0.07% |
 | **v5 Alpha Platform — shares + SPY** | **SHARES** | **+1.39%** |
+| v9 Long calls/puts — signal-directed, 6 names, f=0.25 | OPTIONS | −1.85% (avg of 6) |
+| **v9 Long CALLS ONLY — 6 names, f=0.25** | **OPTIONS** | **+0.98% (avg of 6); AMD +4.77%, NVDA +4.87%** |
 | *SPY buy-and-hold* | *SHARES* | *+1.00%* |
+| *Equal-weight buy-and-hold, the same six names* | *SHARES* | *+2.88%* |
+
+**v9 is the first options campaign to produce a real right tail.** Straight long
+calls at 25% of equity per 3-week cycle: TSLA P(5x)=15.6% and **P(10x)=7.3%**
+over rolling 7-month windows, NVDA P(10x)=5.2%, AMD P(10x)=3.1% — against
+P(10x)=0% for every earlier campaign and 0% for buy-and-hold. The portfolio
+tail-maximizing config (ATM, 50% sizing, calls only) reaches **P(5x)=12%,
+P(10x)=6%** — at +0.07%/month, −98.5% drawdown, and ruin on 4 of 6 names.
+
+**But there is no alpha in it — only amplified beta.** The momentum signal is
+*actively harmful*: calls-only beat signal-directed in every one of the 12
+paired configurations (mean −0.67%/mo vs −1.96%/mo). "Calls only on six mega-cap
+tech names, 2018–2026" is a leveraged long bet on the largest tech bull run in
+history, on a universe selected with hindsight. Only AMD (+4.77%) and NVDA
+(+4.87%) beat simply owning the same share (+3.73%, +3.66%), and they do it at
+−93% and −91% drawdown versus the stock's own much shallower path.
+
+**Per-position economics (785 positions, split-corrected):** mean 1.131x, median
+**0.462x**, win rate 34.8%, 6.5% expire worthless, 18.2% ≥2x, 4.1% ≥5x, best
+13.5x. The median position loses 54% while the mean gains 13% — textbook
+convexity. Puts (0.60–1.04x) systematically underperform calls (1.03–1.54x),
+which is precisely why the signal destroys value.
+
+**Sizing is the whole game for a threshold objective.** The identical strategy
+returns +2.93%/mo at 10% of equity per cycle, +3.74%/mo at 25%, −4.68%/mo at
+50%, and −5.77%/mo at 100%. The first per-symbol run at f=0.50 wiped out all six
+names and reported −4.4 to −4.8%/month; that was the sizing, not the strategy.
 
 **Why:** options are an amplifier, not a source of edge. They multiply both the
 signal and the friction. Our best measured directional edge is IC ≈ 0.035, while
@@ -55,6 +84,25 @@ premium is still too thin to clear even the reduced friction.
 positive out-of-sample edge.** The cheapest venue in the options market gets you
 to zero, not to profit.
 
+## Framework refactor (2026-08-15)
+
+The repository is now a stable shared core with swappable strategies. Every
+strategy travels one fixed pipeline — screener -> strategy -> RiskManager ->
+cost model -> exits -> metrics -> report — and no strategy can decline a check.
+
+**Verified behaviour-preserving:** the Drift campaign re-run through the
+refactored pipeline reproduces its stored artifact bit-for-bit (690 trades,
+ending equity $33,484.328, max DD -66.5187%, win rate 52.029%). Structure
+changed; measurement did not.
+
+**Found during the refactor:**
+
+| Finding | Status |
+|---|---|
+| `chronological_split` returns `(boundary, boundary)`; callers run train `[start, boundary]` and test `[boundary, end]`, so the boundary session sits in BOTH segments — a one-session leak out of ~2160. | Legacy function left untouched so archived results reproduce; the pipeline uses the new `chronological_split_exclusive`. **Open decision: whether to re-run archived campaigns on the corrected split.** |
+| 4 of 9 campaigns bypassed the RiskManager; 4 of 9 priced their own fills by reading `.bid`/`.ask`, paying no commission or slippage. | Fixed structurally — strategies cannot import `catalyst.risk`, `catalyst.costs`, `catalyst.brokers` or `catalyst.execution`, enforced by AST test. |
+| The N>100 flag was duplicated in 4 files, the concentration check in 6, the zero-cost diagnostic in 8 — each opt-in. | All moved into `reporting/`; every strategy is judged identically with no opt-out. |
+
 ## Rules earned the hard way — do not re-test these
 
 | Rule | Evidence |
@@ -67,6 +115,10 @@ to zero, not to profit.
 | **Overlapping windows fabricate significance.** | A 63-day horizon sampled every 5 days produced t=5.98 that was really t≈1.68. Always sample non-overlapping. |
 | **Always include a random control.** | It has validated every harness we trust and would have caught any lookahead. |
 | **Cross-check metrics against each other.** | v8 first reported +4.01%/mo alongside profit factor 0.98 — impossible, and it exposed a credit double-count in the cash ledger. Trade-level stats and the equity curve must agree or one of them is lying. |
+| **Never mix split-ADJUSTED prices with RAW option strikes.** | v9: Alpaca daily bars are split-adjusted, ThetaData strikes are raw as-of-date. Targeting a strike off the adjusted price bought deep-ITM contracts on every pre-split date — AMZN ratio 20.03x, TSLA 14.93x, NVDA 10.04x, while unsplit MSFT was 1.00x. **Half the universe looked correct, which is why it survived a whole campaign.** Always select strikes from `chain.underlying_price`, the chain's own contemporaneous spot. |
+| **Never fabricate an exit price for a missing contract.** | v9 fell back to intrinsic when a contract was absent from the exit chain, marking a vanished pre-split strike against a post-split spot and manufacturing a **924x put**. A contract absent at exit is *unpriceable* — skip the position and count it. |
+| **Derive elapsed time from DATES, never from row count.** | v9 marked equity only at exits (~16 rows/year); `len(equity)/21` read that as 0.8 months and turned a +10% year into "+12.8% per month". Any curve not sampled daily breaks row-count time math. |
+| **Ruin must be a reported outcome, not a silent early exit.** | v9 stopped trading at a 1%-of-capital floor; TSLA logged 13 of 139 scheduled cycles, which reads as missing data unless the wipeout is stated outright. |
 
 ## What actually works
 
@@ -107,7 +159,8 @@ to zero, not to profit.
 | v5 Alpha Platform | **+1.35%/mo** | **First real, robust edge** | `catalyst/alpha/` | alpha v5 report |
 | v6 Tournament Engine | −3.89%/mo standalone | Model said P(10x)=31%, real chains 0% | `catalyst/tournament/` | tournament verdict |
 | v7 Combined Allocator | +2.49%/mo (concentration-flagged) | Archived | `catalyst/allocator/` | v7 campaign |
-| **v8 Index VRP** | **+0.07%/mo (test −0.07%)** | **ACTIVE — break-even** | `catalyst/index_vrp/` | this campaign |
+| v8 Index VRP | +0.07%/mo (test −0.07%) | Archived — break-even | `catalyst/index_vrp/` | v8 campaign |
+| **v9 Long calls/puts** | **+0.98%/mo calls-only; −1.85% signal-directed** | **ACTIVE — first real right tail (P(10x)=7.3% TSLA), but no alpha** | `catalyst/persymbol/long_options.py` | this campaign |
 
 ## Re-running an archived campaign
 
@@ -120,6 +173,9 @@ uv run python -m catalyst.archive.runners.kinetic_runner --costs both
 uv run python -m catalyst.archive.runners.drift_runner --arms credit condor debit
 uv run python -m catalyst.archive.runners.alpha_lab_runner        # IC diagnostics
 uv run python -m catalyst.archive.runners.tournament_runner       # P(threshold) grid
+uv run python -m catalyst.runners.long_options_runner --calls-only  # v9 per-symbol table
+uv run python -m catalyst.runners.long_options_sweep              # v9 24-config frontier
+uv run python -m catalyst.runners.long_options_trades             # v9 per-position distribution
 ```
 
 Shared infrastructure — data layer, SimulatedBroker, RiskManager, exit manager,

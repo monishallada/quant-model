@@ -21,9 +21,10 @@ from datetime import datetime
 from functools import reduce
 from typing import Any
 
+from catalyst import costs
 from catalyst.core.config import CommissionsConfig, FillModelConfig
 from catalyst.core.interfaces import Broker
-from catalyst.core.models import (
+from catalyst.core.types import (
     AccountState,
     ExitRules,
     OptionChain,
@@ -46,9 +47,11 @@ class SimulatedBroker(Broker):
         fill_model: FillModelConfig,
         commissions: CommissionsConfig,
         starting_cash: float,
+        cost_model: costs.CostModel | None = None,
     ) -> None:
         self._fill = fill_model
         self._commissions = commissions
+        self._cost_model = cost_model or costs.build(fill_model, commissions)
         self.cash = starting_cash
         self._positions: dict[str, Position] = {}
         self._chains: dict[str, OptionChain] = {}
@@ -120,24 +123,19 @@ class SimulatedBroker(Broker):
     # ------------------------------------------------------------------
 
     def _leg_fill_price(self, order: Order) -> dict[int, float] | None:
-        """Per-leg modeled fill prices (per share), or None if unquotable."""
+        """Per-leg modeled fill prices (per share), or None if unquotable.
+
+        Delegates to ``costs.CostModel`` — the broker owns the ledger, not the
+        cost math. That separation is what lets the zero-cost diagnostic run
+        the identical path with frictions switched off.
+        """
         prices: dict[int, float] = {}
         for i, leg in enumerate(order.legs):
             chain = self._chains.get(leg.key.underlying)
             contract = chain.find(leg.key) if chain else None
             if contract is None or contract.ask <= 0 or contract.bid < 0:
                 return None
-            mid = contract.mid
-            frac = self._fill.spread_fill_fraction
-            slip = self._fill.slippage_pct_of_premium
-            flat = self._fill.slippage_per_contract
-            if leg.side is Side.BUY:
-                px = mid + frac * (contract.ask - mid)
-                px = px * (1.0 + slip) + flat
-            else:
-                px = mid - frac * (mid - contract.bid)
-                px = px * (1.0 - slip) - flat
-            prices[i] = max(px, 0.0)
+            prices[i] = self._cost_model.leg_fill(contract, leg.side, leg.qty).price
         return prices
 
     # ------------------------------------------------------------------

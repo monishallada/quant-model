@@ -18,7 +18,7 @@ import logging
 from datetime import date, datetime
 
 from catalyst.core.config import RiskConfig
-from catalyst.core.models import (
+from catalyst.core.types import (
     Direction,
     ExitRules,
     OptionChain,
@@ -28,7 +28,7 @@ from catalyst.core.models import (
     ProposedTrade,
     Side,
 )
-from catalyst.engines.util import nearest_delta
+from catalyst.core.chains import nearest_delta
 
 logger = logging.getLogger(__name__)
 
