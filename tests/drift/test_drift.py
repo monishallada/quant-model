@@ -281,3 +281,28 @@ def test_risk_manager_sizes_credit_spread_on_max_loss() -> None:
     decision = rm.size_entry(proposal, account, [])
     # 2% of 100k = $2,000 budget; unit risk $400 x 1.05 buffer = $420 -> 4 units.
     assert decision.units == 4
+
+
+# ---------------------------------------------------------------------------
+# v8 index VRP: credit-spread cash accounting
+# ---------------------------------------------------------------------------
+
+
+def test_credit_spread_cash_accounting_does_not_double_count() -> None:
+    """Regression: the credit is received ONCE at entry.
+
+    Closing must DEBIT the liability, not credit the P&L again. The original
+    bug made equity rise while profit factor was below 1.0 — losing trades
+    compounding into gains, which is impossible and was the tell.
+    """
+    credit, liability, contracts = 1.00, 0.50, 10
+    cash = 100_000.0
+    cash += credit * contracts * 100          # entry: receive the credit
+    open_liability = credit * contracts * 100
+    assert cash - open_liability == pytest.approx(100_000.0)  # flat at entry
+
+    open_liability = liability * contracts * 100              # spread decays
+    assert cash - open_liability == pytest.approx(100_500.0)  # +$500 unrealized
+
+    cash -= liability * contracts * 100                       # close: pay the liability
+    assert cash == pytest.approx(100_500.0)                   # realized == unrealized

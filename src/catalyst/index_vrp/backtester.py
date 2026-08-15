@@ -120,7 +120,12 @@ def run_index_vrp(cfg: Config, data, benchmark: pd.Series, start: date, end: dat
                 reason = "expiry_buffer"
             if reason:
                 pnl = (op.pos.credit - liability) * contracts * 100.0
-                cash += pnl
+                # Closing a credit spread COSTS the liability. The credit was
+                # already added to cash at entry, so adding the P&L here would
+                # count it twice — which inflates equity even when the trades
+                # themselves lose money (profit factor < 1 with a rising curve
+                # is the signature of exactly this bug).
+                cash -= liability * contracts * 100.0
                 trades.append(TradeRecord(
                     position_id=pid, engine="index_vrp",
                     catalyst_ref=f"{op.pos.symbol}:{op.pos.expiry}",

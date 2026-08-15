@@ -26,6 +26,7 @@ Measured avg monthly return, real costs, full period:
 | v4 Drift — credit spreads | OPTIONS | −1.06% |
 | v6 Tournament — 3–5wk OTM calls (standalone) | OPTIONS | −3.89% |
 | v2 Pairs V1 — shares | SHARES | −0.07% |
+| v8 Index VRP — SPY/QQQ put credit spreads | OPTIONS | +0.07% |
 | **v5 Alpha Platform — shares + SPY** | **SHARES** | **+1.39%** |
 | *SPY buy-and-hold* | *SHARES* | *+1.00%* |
 
@@ -40,9 +41,19 @@ negative one — demonstrated seven separate ways.
 engine, but a bounded-cost lottery ticket that supplies a right tail a
 compounding book cannot. That is exactly how v7 uses them (20% allocation).
 
-**The one untested options path worth trying:** index options (SPY/SPX) are
-penny-wide and 5–10× cheaper to trade than single names, which is the variable
-that killed every campaign above.
+**The index-options path was tested (v8) and the cost thesis was CORRECT but
+insufficient.** Measured spreads: SPY 0.65% of mid, QQQ 0.95%, vs 4.43% average
+across single names — **3.1× cheaper**. Moving the identical credit-spread trade
+to that venue improved per-trade economics by ~$110 (v4 single-name: −$96/trade;
+v8 index: +$14/trade), which took options from clearly negative to roughly
+**break-even (+0.07%/month over 8.6 years)**. 78.8% win rate across 532 trades,
+but profit factor 1.04 in-sample and **0.95 out-of-sample**. The venue change
+was worth about 1.1%/month — almost exactly the cost saving — and the underlying
+premium is still too thin to clear even the reduced friction.
+
+**Conclusion across eight campaigns: no options structure has produced a
+positive out-of-sample edge.** The cheapest venue in the options market gets you
+to zero, not to profit.
 
 ## Rules earned the hard way — do not re-test these
 
@@ -55,6 +66,7 @@ that killed every campaign above.
 | **Small samples lie.** | Engine C looked like +$125/trade at N=85. The same structure at N=926 was gross-negative. |
 | **Overlapping windows fabricate significance.** | A 63-day horizon sampled every 5 days produced t=5.98 that was really t≈1.68. Always sample non-overlapping. |
 | **Always include a random control.** | It has validated every harness we trust and would have caught any lookahead. |
+| **Cross-check metrics against each other.** | v8 first reported +4.01%/mo alongside profit factor 0.98 — impossible, and it exposed a credit double-count in the cash ledger. Trade-level stats and the equity curve must agree or one of them is lying. |
 
 ## What actually works
 
@@ -94,7 +106,8 @@ that killed every campaign above.
 | v4 Drift Harvest | −9.5%/mo | Real gross edge, 15× too small | `archive/drift/` | drift verdict |
 | v5 Alpha Platform | **+1.35%/mo** | **First real, robust edge** | `catalyst/alpha/` | alpha v5 report |
 | v6 Tournament Engine | −3.89%/mo standalone | Model said P(10x)=31%, real chains 0% | `catalyst/tournament/` | tournament verdict |
-| **v7 Combined Allocator** | **+2.49%/mo (concentration-flagged)** | **ACTIVE** | `catalyst/allocator/` | this campaign |
+| v7 Combined Allocator | +2.49%/mo (concentration-flagged) | Archived | `catalyst/allocator/` | v7 campaign |
+| **v8 Index VRP** | **+0.07%/mo (test −0.07%)** | **ACTIVE — break-even** | `catalyst/index_vrp/` | this campaign |
 
 ## Re-running an archived campaign
 
