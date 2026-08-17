@@ -104,17 +104,27 @@ class TestComparisonSurfacesDivergence:
 
 
 class TestEngineRegistry:
-    def test_native_and_nautilus_are_available(self):
-        avail = {e.name: e.available()[0] for e in build_engines()}
+    def test_default_flow_is_native_only(self):
+        """The default path is the validated native pipeline alone."""
+        from catalyst.backtest.engines import DEFAULT_ENGINES
+        assert DEFAULT_ENGINES == ("native",)
+        assert [e.name for e in build_engines()] == ["native"]
+
+    def test_second_engines_remain_opt_in_and_available(self):
+        """Nothing was deleted — the cross-check engines still build and run."""
+        from catalyst.backtest.engines import ALL_ENGINES
+        avail = {e.name: e.available()[0] for e in build_engines(ALL_ENGINES)}
         assert avail["native"] and avail["nautilus"]
 
     def test_unavailable_engine_reports_reason_and_never_raises(self):
-        for e in build_engines():
+        from catalyst.backtest.engines import ALL_ENGINES
+        for e in build_engines(ALL_ENGINES):
             ok, why = e.available()
             assert isinstance(ok, bool) and isinstance(why, str) and why
 
     def test_every_engine_states_what_it_verifies(self):
         """Stops a reader over-reading agreement between engines that check
         different things."""
-        for e in build_engines():
+        from catalyst.backtest.engines import ALL_ENGINES
+        for e in build_engines(ALL_ENGINES):
             assert e.verifies, f"{e.name} does not state what it verifies"

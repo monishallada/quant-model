@@ -31,6 +31,7 @@ import logging
 import os
 import shutil
 import subprocess
+import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -71,49 +72,125 @@ def _lean_cli() -> tuple[bool, str]:
 class ThetaToLeanWriter:
     """Convert ThetaData option quotes into LEAN's on-disk option format.
 
-    LEAN expects, per underlying and per date, zipped CSVs of option quotes
-    keyed by the OSI-style contract identity. We already hold the canonical
-    `OptionKey`, so this is a mechanical projection — and critically it reuses
-    the SAME ThetaData snapshots the native engine consumes, so any divergence
-    between the two engines is attributable to *engine* behaviour rather than
-    to two different price sources.
+    Both formats below were read off LEAN's own bundled data inside the
+    container rather than guessed — guessing produced runs that completed
+    cleanly and traded nothing, which is the worst kind of failure here.
 
-    Prices are written in LEAN's deci-cent convention (x10000).
+    LEAN needs TWO artefacts per symbol per date:
+
+    1. **Universe file** ``option/usa/universes/<sym>/<YYYYMMDD>.csv`` — this is
+       what resolves the option chain. Without it the chain is empty, the
+       algorithm finds nothing to trade, and the backtest reports a tidy
+       ``Start Equity 100000 / End Equity 100000``.
+
+           #expiry,strike,right,open,high,low,close,volume,open_interest,...
+           ,,,70.5300,70.5600,70.5000,70.5600,0,,,,,,,     <- underlying row
+           20140621,42.5,C,27.7750,...
+
+    2. **Minute quotes** ``option/usa/minute/<sym>/<YYYYMMDD>_quote_american.zip``
+       containing one CSV per contract, named
+
+           <YYYYMMDD>_<sym>_minute_quote_american_<right>_<strike*10000>_<expiry>.csv
+
+       with rows of
+
+           ms_since_midnight,bid_o,bid_h,bid_l,bid_c,bid_size,ask_o,ask_h,ask_l,ask_c,ask_size
+
+       Prices are deci-cents (x10000); 1900 means $0.19.
+
+    Everything is derived from the SAME ThetaData snapshots the native engine
+    consumes — one subscription, one price source, so a divergence between the
+    engines is attributable to engine behaviour rather than to two feeds.
     """
 
     data_root: Path = DATA_ROOT
 
+    # -- paths -------------------------------------------------------------
     def option_dir(self, symbol: str) -> Path:
         return self.data_root / "option" / "usa" / "minute" / symbol.lower()
 
+    def universe_dir(self, symbol: str) -> Path:
+        return self.data_root / "option" / "usa" / "universes" / symbol.lower()
+
+    def equity_dir(self, symbol: str) -> Path:
+        return self.data_root / "equity" / "usa" / "minute" / symbol.lower()
+
+    # -- writing -----------------------------------------------------------
     def write_chain(self, symbol: str, when: datetime, chain) -> int:
-        """Write one chain snapshot. Returns contracts written."""
+        """Write one snapshot in BOTH formats. Returns contracts written."""
+        quotable = [c for c in chain.contracts if c.bid > 0 and c.ask > 0]
+        if not quotable:
+            return 0
+        self._write_universe(symbol, when, chain, quotable)
+        self._write_quotes(symbol, when, quotable)
+        # An option without its underlying is unusable: LEAN logs
+        # "Option underlying GetLastData returned null" for every slice and
+        # never fills anything.
+        self._write_underlying(symbol, when, chain)
+        return len(quotable)
+
+    def _write_underlying(self, symbol: str, when: datetime, chain) -> None:
+        spot = float(chain.underlying_price)
+        if spot <= 0:
+            return
+        out = self.equity_dir(symbol)
+        out.mkdir(parents=True, exist_ok=True)
+        day = f"{when.date():%Y%m%d}"
+        ms = (when.hour * 3600 + when.minute * 60 + when.second) * 1000
+        px = int(round(spot * 10000))
+        archive = out / f"{day}_trade.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+            # One bar per minute across the session so the underlying is never
+            # stale when LEAN asks for it mid-slice.
+            rows = [f"{t},{px},{px},{px},{px},100"
+                    for t in range(int(9.5 * 3600 * 1000), 16 * 3600 * 1000, 60_000)]
+            z.writestr(f"{day}_{symbol.lower()}_minute_trade.csv",
+                       "\n".join(rows) + "\n")
+
+    def _write_universe(self, symbol: str, when: datetime, chain, contracts) -> None:
+        out = self.universe_dir(symbol)
+        out.mkdir(parents=True, exist_ok=True)
+        spot = float(chain.underlying_price)
+        lines = ["#expiry,strike,right,open,high,low,close,volume,open_interest,"
+                 "implied_volatility,delta,gamma,vega,theta,rho"]
+        # The underlying's own row carries empty expiry/strike/right.
+        lines.append(f",,,{spot:.4f},{spot:.4f},{spot:.4f},{spot:.4f},0,,,,,,,")
+        for c in contracts:
+            k = c.key
+            mid = (c.bid + c.ask) / 2.0
+            g = c.greeks
+            lines.append(
+                f"{k.expiry:%Y%m%d},{k.strike:g},"
+                f"{'C' if k.right is OptionRight.CALL else 'P'},"
+                f"{mid:.4f},{mid:.4f},{mid:.4f},{mid:.4f},"
+                f"{int(c.volume or 0)},{int(c.open_interest or 0)},"
+                + (f"{g.iv:.7f},{g.delta:.7f},{(g.gamma or 0):.7f},"
+                   f"{g.vega:.7f},{g.theta:.7f},{(g.rho or 0):.7f}"
+                   if g is not None else ",,,,,"))
+        (out / f"{when.date():%Y%m%d}.csv").write_text("\n".join(lines) + "\n")
+
+    def _write_quotes(self, symbol: str, when: datetime, contracts) -> None:
         out = self.option_dir(symbol)
         out.mkdir(parents=True, exist_ok=True)
-        rows = []
-        for c in chain.contracts:
-            if c.bid <= 0 or c.ask <= 0:
-                continue
-            k = c.key
-            rows.append({
-                "time": int(pd.Timestamp(when).value // 1_000_000),
-                "expiry": k.expiry.strftime("%Y%m%d"),
-                "strike": int(round(k.strike * 10000)),
-                "right": "C" if k.right is OptionRight.CALL else "P",
-                "bid": int(round(c.bid * 10000)),
-                "ask": int(round(c.ask * 10000)),
-                "bidsize": max(int(c.open_interest or 0), 1),
-                "asksize": max(int(c.open_interest or 0), 1),
-            })
-        if not rows:
-            return 0
-        path = out / f"{when.date():%Y%m%d}_quote.csv"
-        pd.DataFrame(rows).to_csv(path, index=False, header=False)
-        return len(rows)
+        day = f"{when.date():%Y%m%d}"
+        ms = (when.hour * 3600 + when.minute * 60 + when.second) * 1000
+        archive = out / f"{day}_quote_american.zip"
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+            for c in contracts:
+                k = c.key
+                right = "call" if k.right is OptionRight.CALL else "put"
+                strike = int(round(k.strike * 10000))
+                name = (f"{day}_{symbol.lower()}_minute_quote_american_"
+                        f"{right}_{strike}_{k.expiry:%Y%m%d}.csv")
+                bid = int(round(c.bid * 10000))
+                ask = int(round(c.ask * 10000))
+                size = max(int(c.open_interest or 1), 1)
+                z.writestr(name, f"{ms},{bid},{bid},{bid},{bid},{size},"
+                                 f"{ask},{ask},{ask},{ask},{size}\n")
 
     def coverage(self, symbol: str) -> int:
         d = self.option_dir(symbol)
-        return len(list(d.glob("*_quote.csv"))) if d.exists() else 0
+        return len(list(d.glob("*_quote_american.zip"))) if d.exists() else 0
 
 
 class LeanEngine(BacktestEngine):

@@ -33,7 +33,8 @@ from enum import Enum
 from pathlib import Path
 
 from catalyst.core.config import load_config
-from catalyst.core.interfaces import Broker, DataSource, Strategy
+from catalyst.core.interfaces import Broker, Cadence, DataSource, Strategy
+from catalyst.screener.catalyst_screener import CatalystScreener
 from catalyst.execution.engine import ExecutionEngine
 from catalyst.observability.killswitch import KillSwitch, configure_json_logging
 from catalyst.risk.manager import RiskManager
@@ -67,13 +68,20 @@ class Wiring:
 # mode -> (DataSource, Broker). The single switch point in the system.
 # ----------------------------------------------------------------------
 def build_wiring(mode: Mode, cfg, *, dry_run: bool = False) -> Wiring:
+    from catalyst.data.alpaca_history import AlpacaDailyBars
     from catalyst.data.cache import ParquetCache
     from catalyst.data.thetadata_client import ThetaDataClient
     from catalyst.data.thetadata_historical import ThetaDataHistorical
 
     cache = ParquetCache(cfg.data.cache_dir)
+    # ThetaData's STOCK tier here is FREE, so /v3/stock/history 403s on any
+    # multi-year pull. Options data is STANDARD and fine. Every prior campaign
+    # solved this the same way: keep ThetaData for chains, inject Alpaca for
+    # underlying history. Without it a catalyst strategy dies on the first
+    # signal lookup with a subscription error that reads like a code fault.
     data = ThetaDataHistorical(cfg.data, client=ThetaDataClient(cfg.data.thetadata),
-                               cache=cache)
+                               cache=cache,
+                               history_provider=AlpacaDailyBars(cfg.data.alpaca, cache))
 
     if mode is Mode.BACKTEST:
         from catalyst.brokers.simulated import SimulatedBroker
@@ -242,7 +250,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.mode is Mode.BACKTEST:
         from catalyst.backtest.pipeline import Pipeline
-        pipeline = Pipeline(cfg=cfg, data=wiring.data,
+        # A CATALYST-cadence strategy enumerates its opportunities from this
+        # calendar. Omitting it is silent: the run completes over every session,
+        # finds nothing to trade, and reports a tidy zero-trade verdict. That is
+        # exactly what happened on the first catalyst_variance run.
+        catalysts = _load_catalysts(cfg, args.start, args.end) \
+            if strategy.cadence is Cadence.CATALYST else []
+        if strategy.cadence is Cadence.CATALYST and not catalysts:
+            raise DeploymentRefused(
+                f"REFUSED: '{args.strategy}' is CATALYST cadence but no catalysts "
+                f"were loaded for {args.start}..{args.end}. Running would report "
+                "zero trades as though the strategy simply never triggered.")
+        pipeline = Pipeline(cfg=cfg, data=wiring.data, catalysts=catalysts,
+                            screener=CatalystScreener(cfg.screener),
                             signal=build_signal(args.signal, cfg))
         report = pipeline.run_and_save(
             strategy, args.start, args.end,
@@ -276,6 +296,26 @@ def main(argv: list[str] | None = None) -> int:
     print("\nSession live. Kill switch: touch "
           f"{kill.path} to halt new entries immediately.")
     return 0
+
+
+def _load_catalysts(cfg, start: date, end: date):
+    """Earnings + economic calendar, the same sources every prior campaign used."""
+    from catalyst.data.alpaca_history import AlpacaDailyBars
+    from catalyst.data.cache import ParquetCache
+    from catalyst.data.catalysts import StaticEconomicCalendar, YFinanceEarnings
+
+    cache = ParquetCache(cfg.data.cache_dir)
+    earnings_symbols = [s for s in cfg.watchlist
+                        if s not in cfg.catalysts.economic_symbols]
+    out = []
+    for provider in (
+        StaticEconomicCalendar(cfg.catalysts.calendars_dir,
+                               cfg.catalysts.economic_symbols),
+        YFinanceEarnings(earnings_symbols, cache),
+    ):
+        out.extend(provider.get_catalyst_calendar(start, end))
+    logger.info("loaded %d catalysts (%s..%s)", len(out), start, end)
+    return sorted(out, key=lambda c: c.when)
 
 
 def build_signal(name: str, cfg):

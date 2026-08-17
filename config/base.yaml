@@ -412,7 +412,7 @@ persymbol:                               # v9 — per-symbol strategy lab
 # order and are never relaxed by any module, optimizer, or sweep result.
 # ---------------------------------------------------------------------------
 risk:
-  cash_floor_fraction: 0.40              # NEVER deployed; hard survival guarantee
+  cash_floor_fraction: 0.50              # NEVER deployed; hard survival guarantee
   sizing_cost_buffer: 0.05               # size as if fills cost this much beyond worst NBBO
   hedge_fraction: 0.10                   # index-put hedge sleeve (drawdown reducer)
   hedge:
@@ -421,7 +421,7 @@ risk:
     dte_window_days: [45, 100]           # buy puts with expiry in this window
     min_add_fraction: 0.25               # only add when budget gap >= this fraction of target
     check_weekday: 0                     # evaluate hedge Mondays (0=Mon) + when sleeve is empty
-  max_deployed: 0.25                     # portfolio heat: total premium at risk cap
+  max_deployed: 0.20                     # portfolio heat: total premium at risk cap
   max_correlated_positions: 3            # per correlation group
   correlation_lookback_days: 60
   correlation_threshold: 0.70            # underlyings above this are one group

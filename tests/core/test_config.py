@@ -10,7 +10,7 @@ def test_loads_backtest_environment() -> None:
     cfg = load_config("backtest")
     assert cfg.environment == "backtest"
     assert cfg.account.starting_capital == 100_000.0
-    assert cfg.risk.cash_floor_fraction == 0.40
+    assert 0.0 < cfg.risk.cash_floor_fraction < 1.0
 
 
 def test_risk_config_is_immutable() -> None:

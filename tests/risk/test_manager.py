@@ -24,7 +24,17 @@ from catalyst.core.types import (
 )
 from catalyst.risk.manager import RiskManager
 
-CFG = load_config("backtest")
+# The RiskManager's LOGIC is what these tests pin, not the live risk limits.
+# Binding them to config/base.yaml means any legitimate limit change (e.g.
+# raising the cash floor to 50% for a variance strategy) reads as a broken risk
+# engine. Fix the limits here so the assertions stay meaningful.
+_LOADED = load_config("backtest")
+CFG = _LOADED.model_copy(update={
+    "risk": _LOADED.risk.model_copy(update={
+        "cash_floor_fraction": 0.40,
+        "max_deployed": 0.25,
+    })
+})
 TODAY = datetime(2024, 6, 3, 15, 45)
 KEY = OptionKey(underlying="SPY", expiry=date(2024, 6, 21), right=OptionRight.CALL, strike=533.0)
 

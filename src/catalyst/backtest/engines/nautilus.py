@@ -93,6 +93,15 @@ def _run_independent(strategy, start: date, end: date, *, cfg, data, zero_cost: 
     from catalyst.core.tradingcal import sessions_in_range
     from catalyst.data.thetadata_historical import DataUnavailableError
 
+    # This adapter drives a fixed universe on a schedule. A CATALYST strategy
+    # derives its universe from the calendar, so it cannot be mirrored here —
+    # say so plainly instead of reporting "empty universe", which reads like a
+    # config slip rather than an unsupported cadence.
+    if getattr(strategy, "cadence", None) is Cadence.CATALYST:
+        return EngineResult(
+            engine=engine_name,
+            error="CATALYST cadence not supported by the Nautilus adapter "
+                  "(it mirrors a fixed universe on a schedule)")
     universe = _universe(strategy)
     sessions = sessions_in_range(start, end)
     if max_sessions:

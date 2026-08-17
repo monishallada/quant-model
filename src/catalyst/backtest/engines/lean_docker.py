@@ -46,7 +46,7 @@ BASE_CONFIG: dict = {
     "environment": "backtesting",
     "algorithm-type-name": "CatalystMirror",
     "algorithm-language": "Python",
-    "algorithm-location": "/Lean/Algorithm.Python/main.py",
+    "algorithm-location": "/Algorithm/main.py",
     "data-folder": "/Data",
     "results-destination-folder": "/Results",
     "log-handler": "QuantConnect.Logging.CompositeLogHandler",
@@ -75,9 +75,14 @@ class LeanDockerEngine(BacktestEngine):
     verifies = ("fully independent event loop with corporate actions (splits), "
                 "early assignment/exercise, dividends and margin modelling")
 
-    def __init__(self, timeout: int = 2400) -> None:
+    def __init__(self, timeout: int = 2400, mirrors: str | None = None) -> None:
         self._timeout = timeout
         self._project = LEAN_ROOT / "project"
+        #: Name of the strategy the scaffolded algorithm actually mirrors.
+        #: Written by lean_setup; if it does not match the strategy being run,
+        #: this engine refuses rather than reporting the old algorithm's numbers
+        #: in a comparison table as though they were the new strategy's.
+        self._mirrors = mirrors
 
     # -- availability ------------------------------------------------------
     def available(self) -> tuple[bool, str]:
@@ -95,12 +100,33 @@ class LeanDockerEngine(BacktestEngine):
                            "(one-time, several GB)")
         return True, f"{why}; {IMAGE} present (no QuantConnect account needed)"
 
+    def _mirror_matches(self, strategy) -> tuple[bool, str]:
+        """The scaffolded algorithm must mirror the strategy being run.
+
+        Presenting a stale algorithm's equity beside a new strategy's is worse
+        than showing nothing: the divergence flag fires on a comparison that
+        was never valid, and the reader has no way to tell.
+        """
+        want = getattr(strategy, "name", None)
+        if want is None:
+            return True, "no strategy supplied (direct invocation)"
+        marker = self._project / "MIRRORS"
+        have = marker.read_text().strip() if marker.exists() else None
+        if have != want:
+            return False, (f"LEAN algorithm mirrors {have or 'an unknown strategy'}, "
+                           f"not '{want}' — re-scaffold with `lean_setup "
+                           f"--strategy {want}` before comparing")
+        return True, f"mirrors {have}"
+
     # -- run ---------------------------------------------------------------
     def run(self, strategy, start: date, end: date, *, cfg, data, signal,
             catalysts=None, screener=None, zero_cost: bool = False) -> EngineResult:
         ok, reason = self.available()
         if not ok:
             return EngineResult(engine=self.name, error=reason)
+        matches, why = self._mirror_matches(strategy)
+        if not matches:
+            return EngineResult(engine=self.name, error=why)
 
         out_dir = OUTPUT_ROOT
         if out_dir.exists():
@@ -120,9 +146,14 @@ class LeanDockerEngine(BacktestEngine):
         cmd = [
             "docker", "run", "--rm",
             "-v", f"{(root / DATA_ROOT).resolve()}:/Data",
-            "-v", f"{(root / self._project).resolve()}/main.py:/Lean/Algorithm.Python/main.py",
+            "-v", f"{(root / self._project).resolve()}:/Algorithm",
             "-v", f"{(root / out_dir).resolve()}:/Results",
-            "-v", f"{(root / cfg_path).resolve()}:/Lean/Launcher/config.json",
+            # The launcher's working directory is /Lean/Launcher/bin/Debug, so
+            # that is where it reads config.json. Mounting to /Lean/Launcher/
+            # is silently ignored and LEAN falls back to its bundled demo
+            # (BasicTemplateFrameworkAlgorithm) — a "successful" run that
+            # measures nothing.
+            "-v", f"{(root / cfg_path).resolve()}:/Lean/Launcher/bin/Debug/config.json",
             IMAGE,
         ]
         try:
@@ -148,15 +179,29 @@ def _image_present() -> bool:
     return bool(r.stdout.strip())
 
 
+def _stat_float(stats: dict, key: str) -> float | None:
+    raw = stats.get(key)
+    if raw is None:
+        return None
+    try:
+        return float(str(raw).replace("$", "").replace(",", "").replace("%", ""))
+    except ValueError:
+        return None
+
+
 def _parse_output(out_dir: Path, engine: str) -> EngineResult:
     """Read LEAN's own equity curve and statistics."""
-    files = sorted(out_dir.glob("*.json"))
+    # LEAN writes several JSON files into the results folder and not all are
+    # objects — the data-monitor report is a bare list. Filter to dicts rather
+    # than assuming a shape.
     payloads = []
-    for f in files:
+    for f in sorted(out_dir.glob("*.json")):
         try:
-            payloads.append(json.loads(f.read_text()))
+            payload = json.loads(f.read_text())
         except Exception:                               # noqa: BLE001
             continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
     if not payloads:
         return EngineResult(engine=engine,
                             error=f"LEAN wrote no parseable result into {out_dir}")
@@ -176,12 +221,24 @@ def _parse_output(out_dir: Path, engine: str) -> EngineResult:
                     curve[pd.Timestamp(pt[0], unit="s")] = float(pt[1])
             except Exception:                           # noqa: BLE001
                 continue
-        stats.update(payload.get("statistics") or payload.get("Statistics") or {})
+        for key in ("statistics", "Statistics", "runtimeStatistics", "RuntimeStatistics"):
+            block = payload.get(key)
+            if isinstance(block, dict):
+                stats.update(block)
 
     if not curve:
-        return EngineResult(engine=engine,
-                            error="LEAN result contained no equity series",
-                            diagnostics={"lean_statistics": stats})
+        # LEAN always reports start/end equity in its statistics even when the
+        # chart series is absent; a two-point curve is enough to compare final
+        # equity, which is the sharpest cross-engine check we have.
+        start_eq = _stat_float(stats, "Start Equity")
+        end_eq = _stat_float(stats, "End Equity")
+        if start_eq and end_eq:
+            curve = {pd.Timestamp("1970-01-01"): start_eq,
+                     pd.Timestamp("1970-01-02"): end_eq}
+        else:
+            return EngineResult(engine=engine,
+                                error="LEAN result contained no equity series",
+                                diagnostics={"lean_statistics": stats})
     return EngineResult(engine=engine, equity=pd.Series(curve).sort_index(),
                         trades=[],
                         diagnostics={"lean_statistics": stats, "independent": True})

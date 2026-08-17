@@ -56,16 +56,26 @@ class TestActiveStrategyIsWiredCorrectly:
         assert out is None or isinstance(out, ProposedTrade)
 
     def test_exit_rules_and_proposal_fields_are_real(self, name, cfg):
-        """Catches `ExitRules(time_stop_days=...)`-class typos: pydantic rejects
-        unknown fields, but only when the line actually executes."""
-        src = inspect.getsource(type(load_strategy(name, cfg)))
+        """Catches `ExitRules(time_stop_days=...)`-class typos.
+
+        Uses the AST rather than a regex: `ExitRules\\(([^)]*)\\)` stops at the
+        first close-paren, which lands inside a nested call like
+        `timedelta(days=2)` and reports 'days' as a bogus ExitRules field.
+        """
+        import ast
+
         from catalyst.core.types import ExitRules
         valid = set(ExitRules.model_fields)
-        import re
-        for kw in re.findall(r"ExitRules\(([^)]*)\)", src, re.S):
-            for field in re.findall(r"(\w+)\s*=", kw):
-                assert field in valid, (
-                    f"{name}: ExitRules has no field '{field}'; valid: {sorted(valid)}")
+        src = inspect.getsource(inspect.getmodule(type(load_strategy(name, cfg))))
+        for node in ast.walk(ast.parse(src)):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "ExitRules"):
+                continue
+            for kw in node.keywords:
+                assert kw.arg in valid, (
+                    f"{name}: ExitRules has no field '{kw.arg}'; "
+                    f"valid: {sorted(valid)}")
 
 
 def _dt():

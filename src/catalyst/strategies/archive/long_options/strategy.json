@@ -1,0 +1,19 @@
+{
+  "name": "long_options",
+  "module": "catalyst.strategies.archive.long_options.long_options",
+  "status": "archived",
+  "date_tested": "2026-08-17",
+  "verdict": "v9: first options structure with a real right tail (TSLA P(10x)=7.3%) but no alpha \u2014 calls-only beat signal-directed in all 12 configs; INCONCLUSIVE under the standard report (N<100)",
+  "avg_monthly_return": -0.22635341936101794,
+  "baseline_annual": 0.01,
+  "validated": false,
+  "paper_tested": false,
+  "notes": "Archived to clear the engine for the paper-competition variance play.",
+  "key_metrics": {
+    "full_avg_monthly": -0.22635341936101794,
+    "full_max_drawdown": -0.4626192109335123,
+    "n_trades": 7,
+    "test_avg_monthly": -0.25381773187310896,
+    "cost_gap": 0.009717928584944135
+  }
+}

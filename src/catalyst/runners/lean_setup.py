@@ -29,33 +29,80 @@ ALGORITHM = '''from AlgorithmImports import *
 
 
 class CatalystMirror(QCAlgorithm):
-    """Mirrors the repo strategy's universe and cadence inside LEAN.
+    """Runs the active strategy's RULE inside LEAN, independently.
 
-    LEAN contributes what the native engine does not model: corporate actions
-    (splits), early assignment/exercise, dividends and margin. Trade selection
-    is intentionally the same so a divergence points at MODELLING rather than
-    at a different set of decisions.
+    LEAN selects its own contracts from its own chain, prices its own fills,
+    applies its own fee and margin models, and computes its own equity. Nothing
+    here reads a native-engine result — only the rule is shared, which is
+    unavoidable if the two engines are to be testing the same strategy.
+
+    What LEAN contributes that the native engine cannot: corporate actions
+    (splits), early assignment and exercise, dividends and margin.
     """
 
     def Initialize(self):
         self.SetStartDate({y0}, {m0}, {d0})
         self.SetEndDate({y1}, {m1}, {d1})
         self.SetCash({cash})
+        self.moneyness = {moneyness}
+        self.hold_days = {hold_days}
+        self.entry_every = {entry_every}
+        self._session = 0
+        self._opened = {{}}
+        self.symbols = []
         for ticker in {universe}:
             eq = self.AddEquity(ticker, Resolution.Minute)
             opt = self.AddOption(ticker, Resolution.Minute)
-            opt.SetFilter(-10, 10, timedelta({dte_lo}), timedelta({dte_hi}))
+            opt.SetFilter(-15, 15, timedelta({dte_lo}), timedelta({dte_hi}))
+            self.symbols.append(opt.Symbol)
+        self.Schedule.On(self.DateRules.EveryDay(),
+                         self.TimeRules.At(15, 45), self.Rebalance)
+
+    def Rebalance(self):
+        self._session += 1
+        # Close anything past its hold, exactly as the native rule does.
+        for symbol, opened in list(self._opened.items()):
+            if (self._session - opened) >= self.hold_days:
+                if self.Portfolio[symbol].Invested:
+                    self.Liquidate(symbol)
+                self._opened.pop(symbol, None)
+        if (self._session - 1) % self.entry_every != 0:
+            return
+        for canonical in self.symbols:
+            chain = self.CurrentSlice.OptionChains.get(canonical)
+            if chain is None:
+                continue
+            underlying = chain.Underlying.Price
+            if underlying <= 0:
+                continue
+            target = underlying * self.moneyness
+            calls = [c for c in chain if c.Right == OptionRight.Call and c.AskPrice > 0.05]
+            if not calls:
+                continue
+            pick = sorted(calls, key=lambda c: (abs(c.Strike - target), c.Expiry))[0]
+            if pick.Symbol in self._opened:
+                continue
+            # LEAN sizes against its OWN portfolio and margin model.
+            qty = self.CalculateOrderQuantity(pick.Symbol, {risk_fraction})
+            if qty and qty > 0:
+                self.MarketOrder(pick.Symbol, max(int(qty), 1))
+                self._opened[pick.Symbol] = self._session
 '''
 
 
-def scaffold(cfg, start: date, end: date, universe: list[str]) -> Path:
+def scaffold(cfg, start: date, end: date, universe: list[str],
+             mirrors: str = "long_options") -> Path:
     project = LEAN_ROOT / "project"
     project.mkdir(parents=True, exist_ok=True)
     (project / "main.py").write_text(ALGORITHM.format(
         y0=start.year, m0=start.month, d0=start.day,
         y1=end.year, m1=end.month, d1=end.day,
         cash=int(cfg.account.starting_capital),
-        universe=universe, dte_lo=23, dte_hi=47))
+        universe=universe, dte_lo=23, dte_hi=47,
+        moneyness=1.05, hold_days=15, entry_every=15, risk_fraction=0.05))
+    # Stamp what this algorithm mirrors so the engine can refuse to report a
+    # stale run against a different strategy.
+    (project / "MIRRORS").write_text(mirrors + "\n")
     (project / "config.json").write_text(
         '{\n  "algorithm-language": "Python",\n'
         '  "parameters": {},\n'
@@ -95,10 +142,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start", type=date.fromisoformat, default=date(2024, 1, 2))
     ap.add_argument("--end", type=date.fromisoformat, default=date(2024, 3, 28))
     ap.add_argument("--limit", type=int, default=20, help="max sessions to convert")
+    ap.add_argument("--strategy", default="long_options",
+                    help="which strategy this algorithm mirrors")
     args = ap.parse_args(argv)
 
     cfg = load_config("backtest")
-    project = scaffold(cfg, args.start, args.end, args.symbols)
+    project = scaffold(cfg, args.start, args.end, args.symbols,
+                       mirrors=args.strategy)
     print(f"LEAN project scaffolded at {project}")
 
     if args.convert:
@@ -108,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("run again with --convert to write ThetaData chains into LEAN format")
 
-    from catalyst.backtest.engines.lean import LeanEngine
+    from catalyst.backtest.engines.lean_docker import LeanDockerEngine as LeanEngine
     ok, why = LeanEngine().available()
     print(f"\nLEAN available: {ok} — {why}")
     if not ok:
