@@ -171,6 +171,39 @@ thin, and consumed by the spread at retail access. Reviving any version of it
 requires a MEASURED effective/quoted execution ratio <=45% at the actual
 broker — never an assumed one, and never another backtest.
 
+## v13 frontier gates (2026-08-19) — rebalancing front-run: real flow, no strategy
+
+Harvey/Mazzoleni/Melone 60/40 rebalancing pressure, gated on 2006-2026
+SPY/TLT (n=5,174): the institutional-flow effect is REAL and strong —
+t=-4.43, -7.5bps per 1sd pressure, halves -2.50/-4.28, control clean. Every
+tradeable translation fails: month-end fade +2.4bps t=0.20; the paper's own
+daily sign-rule +1.9bps t=0.31 with a -42% overlay drawdown; 2020+ +7.2bps
+t=0.62. VERDICT: not a standalone strategy. Sole legitimate use: a rebalance-
+timing overlay on an existing core equity book (sub-1%/yr, execution-timing
+value only).
+
+Premise audit (5-10%/day retail algos), full citations in
+scratchpad/frontier/premise_audit.md: ZERO verified sustained cases exist.
+All-time audited ceiling: Larry Williams 1987 contest year ~1.89%/day WITH a
+66% drawdown and an NFA sanction; never replicated in 40 years. Taiwan
+(3.7B transactions): <1% of day traders persistently profitable, top 500 of
+450k earned 38bps/DAY net — the best day traders EVER measured at population
+scale. Brazil: 97% of persistent day traders lose. Every claim >=1%/day
+sustained that was investigated resolved to Ponzi or loss-rolling fraud
+(BitConnect, Mirror Trading, Hope Advisors). Institutional ceiling:
+Medallion ~0.20%/day, capacity-capped.
+
+## v13 EAP gate (2026-08-19) — right-signed, structurally underpowered
+
+Earnings-announcement premium in shares (Barber et al 2013 lineage), one-day
+hold through the reaction session, SPY-adjusted, 7bps RT: n=244 events (7
+mega-caps x 35 quarters), **+37.1bps/event net** — sign and magnitude match
+the published premium — but t=0.81; per-event sigma ~7% needs ~2,200+ events
+for power. VERDICT: INCONCLUSIVE, not dead. The gate cannot be decided on the
+accessible universe; a ~500-name earnings calendar + daily-bars expansion
+(survivorship-managed) is the prerequisite, not more analysis of 7 names.
+TSLA is the outlier the other direction (-58bps/event, n=35).
+
 ## Rules earned the hard way — do not re-test these
 
 | Rule | Evidence |
