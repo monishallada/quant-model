@@ -17,13 +17,16 @@ def fixed_fractional_units(
     equity: float,
     per_trade_risk_fraction: float,
     unit_max_loss: float,
+    multiplier: float = 100.0,
 ) -> int:
-    """Whole units such that units × unit_max_loss×100 ≤ equity × fraction.
+    """Whole units such that units × unit_max_loss×multiplier ≤ equity × fraction.
 
-    Returns 0 when even one unit exceeds the risk budget — the trade is
-    skipped, never up-sized.
+    ``multiplier`` is the instrument's dollars-per-point scale (100 for listed
+    options — the historical default, so existing callers are unchanged — and
+    1 for shares). Returns 0 when even one unit exceeds the risk budget — the
+    trade is skipped, never up-sized.
     """
     if equity <= 0 or unit_max_loss <= 0:
         return 0
     budget = equity * per_trade_risk_fraction
-    return max(math.floor(budget / (unit_max_loss * 100.0)), 0)
+    return max(math.floor(budget / (unit_max_loss * multiplier)), 0)

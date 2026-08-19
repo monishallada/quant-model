@@ -25,6 +25,7 @@ from catalyst import costs
 from catalyst.core.config import CommissionsConfig, FillModelConfig
 from catalyst.core.interfaces import Broker
 from catalyst.core.types import (
+    EquityKey,
     AccountState,
     ExitRules,
     OptionChain,
@@ -55,6 +56,7 @@ class SimulatedBroker(Broker):
         self.cash = starting_cash
         self._positions: dict[str, Position] = {}
         self._chains: dict[str, OptionChain] = {}
+        self._equity_quotes: dict[str, tuple[float, float]] = {}
         self._now: datetime | None = None
         self._order_seq = 0
         self.total_commissions = 0.0
@@ -63,15 +65,28 @@ class SimulatedBroker(Broker):
     # Backtester market-state hooks
     # ------------------------------------------------------------------
 
-    def update_market(self, chains: dict[str, OptionChain], now: datetime) -> None:
-        """Advance simulated time: refresh marks and settle anything expired."""
+    def update_market(self, chains: dict[str, OptionChain], now: datetime,
+                      equity_quotes: dict[str, tuple[float, float]] | None = None) -> None:
+        """Advance simulated time: refresh marks and settle anything expired.
+
+        ``equity_quotes`` maps symbol -> (bid, ask) for share instruments; the
+        intraday loop supplies these per minute. Options-only callers omit it
+        and behave exactly as before.
+        """
         self._chains = chains
+        if equity_quotes is not None:
+            self._equity_quotes = equity_quotes
         self._now = now
         for pos in list(self._positions.values()):
             self._mark_position(pos)
         self._settle_expired(now)
 
     def _leg_mid(self, pos_leg: PositionLeg) -> float | None:
+        if isinstance(pos_leg.key, EquityKey):
+            q = self._equity_quotes.get(pos_leg.key.underlying)
+            if q is None or q[0] <= 0 or q[1] <= 0:
+                return None
+            return (q[0] + q[1]) / 2.0
         chain = self._chains.get(pos_leg.key.underlying)
         if chain is None:
             return None
@@ -97,6 +112,8 @@ class SimulatedBroker(Broker):
         this is a safety net, not a normal path.
         """
         for pid, pos in list(self._positions.items()):
+            if any(isinstance(leg.key, EquityKey) for leg in pos.legs):
+                continue  # shares do not expire
             expiry = min(leg.key.expiry for leg in pos.legs)
             if expiry >= now.date():
                 continue
@@ -113,8 +130,8 @@ class SimulatedBroker(Broker):
             else:
                 logger.warning("Settling %s at last mark; no spot for %s", pid, pos.underlying)
                 value = pos.current_value
-            self.cash += value * pos.qty * 100.0
-            pos.realized_pnl += (value - pos.entry_price) * pos.qty * 100.0
+            self.cash += value * pos.qty * pos.multiplier
+            pos.realized_pnl += (value - pos.entry_price) * pos.qty * pos.multiplier
             logger.warning("Position %s expired in simulation; settled at intrinsic %.2f", pid, value)
             del self._positions[pid]
 
@@ -131,6 +148,12 @@ class SimulatedBroker(Broker):
         """
         prices: dict[int, float] = {}
         for i, leg in enumerate(order.legs):
+            if isinstance(leg.key, EquityKey):
+                q = self._equity_quotes.get(leg.key.underlying)
+                if q is None or q[0] <= 0 or q[1] <= 0:
+                    return None
+                prices[i] = self._cost_model.equity_fill(q[0], q[1], leg.side, leg.qty).price
+                continue
             chain = self._chains.get(leg.key.underlying)
             contract = chain.find(leg.key) if chain else None
             if contract is None or contract.ask <= 0 or contract.bid < 0:
@@ -154,13 +177,17 @@ class SimulatedBroker(Broker):
             return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
                                message="Leg unquotable in current snapshot")
 
-        total_contracts = sum(leg.qty for leg in order.legs)
+        # Per-contract commission applies to OPTION contracts only; US equity
+        # routing is commission-free at both configured brokers. Without this
+        # branch a 500-share order would be charged 500 x $0.65.
+        total_contracts = sum(leg.qty for leg in order.legs
+                              if not isinstance(leg.key, EquityKey))
         commission = self._commissions.per_contract * total_contracts
         # Signed cash flow: buys pay, sells receive.
         cash_flow = 0.0
         for i, leg in enumerate(order.legs):
             sign = -1.0 if leg.side is Side.BUY else 1.0
-            cash_flow += sign * leg_prices[i] * leg.qty * 100.0
+            cash_flow += sign * leg_prices[i] * leg.qty * leg.key.multiplier
         cash_flow -= commission
 
         if order.intent is OrderIntent.OPEN:
@@ -168,7 +195,7 @@ class SimulatedBroker(Broker):
                 return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
                                    message="Insufficient cash (broker-level guard)")
             units = reduce(math.gcd, (leg.qty for leg in order.legs))
-            unit_net = -cash_flow_ex_commission(cash_flow, commission) / (units * 100.0)
+            unit_net = -cash_flow_ex_commission(cash_flow, commission) / (units * order.multiplier)
             pos = Position(
                 position_id=f"pos-{order_id}",
                 legs=[
@@ -204,8 +231,8 @@ class SimulatedBroker(Broker):
         if units > pos.qty:
             return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
                                message=f"Close qty {units} exceeds open {pos.qty}")
-        credit_per_unit = cash_flow_ex_commission(cash_flow, commission) / (units * 100.0)
-        pos.realized_pnl += (credit_per_unit - pos.entry_price) * units * 100.0
+        credit_per_unit = cash_flow_ex_commission(cash_flow, commission) / (units * order.multiplier)
+        pos.realized_pnl += (credit_per_unit - pos.entry_price) * units * pos.multiplier
         pos.qty -= units
         self.cash += cash_flow
         self.total_commissions += commission
@@ -229,7 +256,7 @@ class SimulatedBroker(Broker):
         return list(self._positions.values())
 
     def get_account(self) -> AccountState:
-        pos_value = sum(p.current_value * p.qty * 100.0 for p in self._positions.values())
+        pos_value = sum(p.current_value * p.qty * p.multiplier for p in self._positions.values())
         equity = self.cash + pos_value
         return AccountState(
             equity=equity,

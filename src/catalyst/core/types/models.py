@@ -11,7 +11,7 @@ import enum
 from datetime import date, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 
 class _Model(BaseModel):
@@ -40,8 +40,37 @@ class OptionKey(_Model):
     right: OptionRight
     strike: float = Field(gt=0)
 
+    #: Dollars of exposure per 1.0 of quoted price per unit. Money math must
+    #: multiply by THIS, never by a literal 100 — that literal is what made the
+    #: whole stack options-only.
+    @property
+    def multiplier(self) -> float:
+        return 100.0
+
     def __str__(self) -> str:
         return f"{self.underlying} {self.expiry.isoformat()} {self.right.value} {self.strike:g}"
+
+
+class EquityKey(_Model):
+    """Canonical identity of an equity instrument (shares).
+
+    Fields are disjoint from OptionKey (no expiry/right/strike) and _Model
+    forbids extras, so the InstrumentKey union discriminates unambiguously.
+    """
+
+    underlying: str
+
+    @property
+    def multiplier(self) -> float:
+        return 1.0
+
+    def __str__(self) -> str:
+        return f"{self.underlying} SHARES"
+
+
+#: One leg trades exactly one instrument. Every ledger line multiplies price
+#: by key.multiplier: 100 for listed US options, 1 for shares.
+InstrumentKey = OptionKey | EquityKey
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +230,7 @@ class ExitRules(_Model):
 
 
 class OrderLeg(_Model):
-    key: OptionKey
+    key: InstrumentKey
     side: Side
     qty: int = Field(gt=0)
 
@@ -227,6 +256,18 @@ class Order(_Model):
     def is_multi_leg(self) -> bool:
         return len(self.legs) > 1
 
+    @property
+    def multiplier(self) -> float:
+        return self.legs[0].key.multiplier if self.legs else 100.0
+
+    @model_validator(mode="after")
+    def _no_mixed_multipliers(self) -> "Order":
+        """Shares and options in one order would make unit_cost meaningless —
+        a '1x unit' must have one dollars-per-point scale."""
+        if len({leg.key.multiplier for leg in self.legs}) > 1:
+            raise ValueError("mixed instrument multipliers in one order")
+        return self
+
 
 class OrderStatus(str, enum.Enum):
     FILLED = "filled"
@@ -246,7 +287,7 @@ class OrderResult(_Model):
 
 
 class PositionLeg(_Model):
-    key: OptionKey
+    key: InstrumentKey
     side: Side
     qty: int
 
@@ -270,8 +311,14 @@ class Position(_MutableModel):
     max_loss: float | None = None  # per-unit max loss when it is not the debit paid
 
     @property
+    def multiplier(self) -> float:
+        """Instrument multiplier. Mixed-multiplier structures are forbidden at
+        order construction, so the first leg speaks for all of them."""
+        return self.legs[0].key.multiplier if self.legs else 100.0
+
+    @property
     def unrealized_pnl(self) -> float:
-        return (self.current_value - self.entry_price) * self.qty * 100.0
+        return (self.current_value - self.entry_price) * self.qty * self.multiplier
 
     @property
     def premium_at_risk(self) -> float:
@@ -282,7 +329,7 @@ class Position(_MutableModel):
         negative and would otherwise report zero risk to the portfolio caps.
         """
         basis = self.max_loss if self.max_loss is not None else max(self.entry_price, 0.0)
-        return max(basis, 0.0) * self.qty * 100.0
+        return max(basis, 0.0) * self.qty * self.multiplier
 
     @property
     def underlying(self) -> str:
@@ -322,6 +369,10 @@ class ProposedTrade(_Model):
     exit_rules: ExitRules
     per_trade_risk_fraction: float  # engine's configured equity fraction (sizing input)
     rationale: dict[str, Any] = Field(default_factory=dict)  # logged, never parsed
+
+    @property
+    def multiplier(self) -> float:
+        return self.legs[0].key.multiplier if self.legs else 100.0
 
 
 class TradeRecord(_Model):
@@ -391,6 +442,8 @@ class BacktestResult(_Model):
 
 __all__ = [
     "AccountState",
+    "EquityKey",
+    "InstrumentKey",
     "BacktestResult",
     "Catalyst",
     "CatalystType",

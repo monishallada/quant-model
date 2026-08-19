@@ -1,0 +1,19 @@
+{
+  "name": "catalyst_variance",
+  "module": "catalyst.strategies.archive.catalyst_variance.catalyst_variance",
+  "status": "archived",
+  "date_tested": "2026-08-18",
+  "verdict": "NEGATIVE-EV variance play that failed at its own purpose: 0.0% of months cleared +30% (best month +11.9% in 8.6yr). -0.15%/mo real cost, EV -$75/trade, PF 0.87, N=190. Cash floor BREACHED in 4.16% of resampled paths \u2014 the floor caps deployment, not equity decline. INCONCLUSIVE (test N=65<100).",
+  "avg_monthly_return": -0.0015035271015779728,
+  "baseline_annual": 0.01,
+  "validated": false,
+  "paper_tested": false,
+  "notes": "Paper-competition variance play. Tail damped by 1.5% sizing; the lever is sizing not selection. Barred from live by design.",
+  "key_metrics": {
+    "full_avg_monthly": -0.0015035271015779728,
+    "full_max_drawdown": -0.3081000770029175,
+    "n_trades": 190,
+    "test_avg_monthly": -0.002170091995529644,
+    "cost_gap": 0.0010581956716673169
+  }
+}

@@ -32,6 +32,7 @@ Measured avg monthly return, real costs, full period:
 | **v9 Long CALLS ONLY — 6 names, f=0.25** | **OPTIONS** | **+0.98% (avg of 6); AMD +4.77%, NVDA +4.87%** |
 | *SPY buy-and-hold* | *SHARES* | *+1.00%* |
 | *Equal-weight buy-and-hold, the same six names* | *SHARES* | *+2.88%* |
+| v10 Catalyst variance — long strangles into earnings | OPTIONS | −0.15% |
 
 **v9 is the first options campaign to produce a real right tail.** Straight long
 calls at 25% of equity per 3-week cycle: TSLA P(5x)=15.6% and **P(10x)=7.3%**
@@ -103,7 +104,34 @@ changed; measurement did not.
 | 4 of 9 campaigns bypassed the RiskManager; 4 of 9 priced their own fills by reading `.bid`/`.ask`, paying no commission or slippage. | Fixed structurally — strategies cannot import `catalyst.risk`, `catalyst.costs`, `catalyst.brokers` or `catalyst.execution`, enforced by AST test. |
 | The N>100 flag was duplicated in 4 files, the concentration check in 6, the zero-cost diagnostic in 8 — each opt-in. | All moved into `reporting/`; every strategy is judged identically with no opt-out. |
 
+## v11 ASCENT (2026-08-18) — the target-seeking frontier, measured
+
+The exhaustive all-options design search. Findings that stand:
+
+- **Deep-OTM calls (m1.20) dominate on tail-per-dollar**: same mean as m1.05
+  (1.29 vs 1.27) but P(10x) 3.3% vs 0.3%, max 34x vs 13.5x, at 1/4 the premium.
+- **Dynamic (Dubins-Savage) sizing beats every static fraction on identical
+  data**: P(8.2x in 11 cycles) 14.3% vs 5.3% on the same 133 real windows.
+- **IV-rank conditioning does NOT transfer to deep-OTM calls** (Spearman +0.025
+  vs -0.148 near-the-money): components must be tested JOINTLY.
+- **The frontier for 30%/mo over 8 months is ~14% probability, median ~0** —
+  a property of the distribution, not the architecture. True OOS: 11.4%.
+- Pipeline path (static ~50% deployed): +11.11%/mo over 8.6y, but top-3 trades
+  = 142-165% of P&L in EVERY segment and maxDD -82%. The mean is 3 lottery hits.
+
+| Campaign | Instrument | Avg monthly |
+|---|---|---|
+| v11 ASCENT — 6-name m1.20 calls, static ~50% | OPTIONS | +11.11% (lottery-flagged, maxDD -82%) |
+
 ## Rules earned the hard way — do not re-test these
+
+| Rule | Evidence |
+|---|---|
+| **A cash floor caps DEPLOYMENT, not equity decline.** | v10: 50% floor + 20% max deployed still breached the floor in 4.16% of resampled paths (worst -87.3% vs realized -30.8%). Open positions lose their full premium regardless of the floor; it prevents a fast zero, not a slow one. Never describe it as "the account cannot zero". |
+| **Tiny sizing destroys the tail it was meant to protect.** | v10 bought strangles across 190 catalysts at 1.5% each and posted **0.0% of months >= +30%** over 8.6 years; best month +11.9%. A right-tail strategy sized so small that no winner moves a month is not a lottery ticket, it is a slow fee. The lever for tail frequency is SIZING, not catalyst selection. |
+| **A CATALYST-cadence strategy with no calendar reports zero trades, not an error.** | v10's first run completed all 644 sessions and returned a clean verdict having never traded: the pipeline was constructed without a catalyst calendar. The runner now refuses to start a catalyst strategy with an empty calendar. |
+| **A second engine must refuse when it cannot mirror the strategy.** | v10: LEAN re-ran the PREVIOUS strategy's algorithm and its equity curve was printed in the comparison table as though it measured the new one, firing a divergence flag on a comparison that never existed. Engines now assert which strategy they mirror. |
+
 
 | Rule | Evidence |
 |---|---|

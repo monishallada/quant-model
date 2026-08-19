@@ -53,6 +53,12 @@ class CostModel(ABC):
     @abstractmethod
     def leg_fill(self, contract: OptionContract, side: Side, contracts: int) -> Fill: ...
 
+    def equity_fill(self, bid: float, ask: float, side: Side, shares: int) -> Fill:
+        """Equity fill under the SAME honesty rules: worse-side crossing plus
+        bps slippage, never better than mid. Default provided here so both the
+        real and zero-cost models share one code path shape."""
+        raise NotImplementedError
+
     @staticmethod
     def _assert_not_better_than_nbbo(price: float, contract: OptionContract, side: Side) -> None:
         """A buy may never fill below the mid, a sell never above it.
@@ -97,6 +103,26 @@ class NBBOCostModel(CostModel):
         self._assert_not_better_than_nbbo(price, contract, side)
         return Fill(price=price, commission=self._commissions.per_contract * abs(contracts))
 
+    #: Equity all-in slippage in bps per side on top of worse-side crossing —
+    #: liquid US large caps; the measured figure this project has always used.
+    EQUITY_SLIPPAGE_BPS = 3.5
+
+    def equity_fill(self, bid: float, ask: float, side: Side, shares: int) -> Fill:
+        if bid <= 0 or ask <= 0 or ask < bid:
+            raise ValueError(f"unusable equity quote bid={bid} ask={ask}")
+        mid = (bid + ask) / 2.0
+        frac = self._fill.spread_fill_fraction
+        slip = self.EQUITY_SLIPPAGE_BPS / 1e4
+        if side is Side.BUY:
+            price = (mid + frac * (ask - mid)) * (1.0 + slip)
+            if price < mid:
+                raise BetterThanNBBOError(f"equity buy at {price} better than mid {mid}")
+        else:
+            price = (mid - frac * (mid - bid)) * (1.0 - slip)
+            if price > mid:
+                raise BetterThanNBBOError(f"equity sell at {price} better than mid {mid}")
+        return Fill(price=max(price, 0.0), commission=0.0)  # US equities: $0
+
 
 class ZeroCostModel(CostModel):
     """Frictionless diagnostic twin — mid fills, no slippage, no commission.
@@ -109,6 +135,9 @@ class ZeroCostModel(CostModel):
 
     def leg_fill(self, contract: OptionContract, side: Side, contracts: int) -> Fill:
         return Fill(price=max(contract.mid, 0.0), commission=0.0)
+
+    def equity_fill(self, bid: float, ask: float, side: Side, shares: int) -> Fill:
+        return Fill(price=max((bid + ask) / 2.0, 0.0), commission=0.0)
 
 
 def build(fill: FillModelConfig, commissions: CommissionsConfig, *, zero: bool = False) -> CostModel:

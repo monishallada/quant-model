@@ -143,20 +143,32 @@ class RiskManager:
         if proposal.unit_cost != proposal.unit_cost:  # NaN guard
             return GateDecision(0, "non-finite unit cost")
 
-        # Size against worst-case entry cost plus the configured slippage
-        # buffer so the risk budget is a HARD bound: actual fills can be worse
-        # than mid, and sizing must never let that breach the budget.
-        buffered_risk = (
-            max(proposal.unit_max_loss, proposal.unit_cost) * (1.0 + cfg.sizing_cost_buffer)
+        # RISK basis and CASH-REQUIRED basis are different concepts that merely
+        # coincide for options. Risk = worst-case loss per unit (the premium for
+        # a long option, width-credit for a spread, the defined STOP DISTANCE
+        # for shares). Cash required = what the ledger must fund (the debit for
+        # options, max-loss margin for credit structures, the full share price
+        # for equities). The old max(max_loss, cost) conflated them: provably
+        # identical for every option case (long: the two are equal; credit:
+        # cost<0 so max() picks max_loss for both) but it sized shares off
+        # their full price — a $5-stop equity trade charged $600/unit of risk.
+        buffered_risk = proposal.unit_max_loss * (1.0 + cfg.sizing_cost_buffer)
+        buffered_cash = (
+            max(proposal.unit_cost, proposal.unit_max_loss, 0.0)
+            * (1.0 + cfg.sizing_cost_buffer)
         )
 
-        # 2. Fixed-fractional base size.
-        units = fixed_fractional_units(equity, proposal.per_trade_risk_fraction, buffered_risk)
+        # 2. Fixed-fractional base size on the RISK basis.
+        units = fixed_fractional_units(equity, proposal.per_trade_risk_fraction,
+                               buffered_risk, proposal.multiplier)
         if units <= 0:
             return GateDecision(0, "risk budget below one unit")
 
-        unit_cost_dollars = buffered_risk * 100.0
-        unit_risk_dollars = buffered_risk * 100.0
+        # Dollars per 1x unit follow the instrument's multiplier (100 for
+        # options, 1 for shares) — a hardcoded 100 here would size an equity
+        # position at 1% of its true dollar risk.
+        unit_cost_dollars = buffered_cash * proposal.multiplier
+        unit_risk_dollars = buffered_risk * proposal.multiplier
 
         # 3. Cash floor: cash after paying the debit stays above the floor.
         floor = cfg.cash_floor_fraction * equity

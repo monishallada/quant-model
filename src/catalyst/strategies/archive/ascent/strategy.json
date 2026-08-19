@@ -1,0 +1,19 @@
+{
+  "name": "ascent",
+  "module": "catalyst.strategies.archive.ascent.ascent",
+  "status": "archived",
+  "date_tested": "2026-08-18",
+  "verdict": "Target-seeking frontier measured: P(30%/mo over 8mo)=14.3% real windows / 11.4% true OOS, median ~0. Pipeline path +11.11%/mo but top-3 trades = 142-165% of P&L in every segment (lottery), maxDD -82%. REJECT under edge standard \u2014 correctly.",
+  "avg_monthly_return": 0.11112766521119255,
+  "baseline_annual": 0.01,
+  "validated": false,
+  "paper_tested": false,
+  "notes": "v11. Superseded by intraday platform build (v12).",
+  "key_metrics": {
+    "full_avg_monthly": 0.11112766521119255,
+    "full_max_drawdown": -0.8200697023314949,
+    "n_trades": 359,
+    "test_avg_monthly": 0.09484012312287549,
+    "cost_gap": 0.023256243579903746
+  }
+}
