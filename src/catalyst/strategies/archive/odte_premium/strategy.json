@@ -1,0 +1,19 @@
+{
+  "name": "odte_premium",
+  "module": "catalyst.strategies.archive.odte_premium.odte_premium",
+  "status": "archived",
+  "date_tested": "2026-08-19",
+  "verdict": "Gross 0DTE variance premium CONFIRMED (+0.21%/mo, PF 1.16, 73% win, N=1,992, concentration 4-5%) but fully consumed by the spread: real-cost -0.18%/mo, OOS -0.29%/mo. Break-even needs fills <=45% of quoted spread. REJECT at retail execution.",
+  "avg_monthly_return": -0.0017589646963807049,
+  "baseline_annual": 0.01,
+  "validated": false,
+  "paper_tested": false,
+  "notes": "v12/O1. The fill-quality frontier (0->100% crossing) is the operative result; revival requires MEASURED execution quality <=45%, not more backtesting.",
+  "key_metrics": {
+    "full_avg_monthly": -0.0017589646963807049,
+    "full_max_drawdown": -0.20825760886156308,
+    "n_trades": 1807,
+    "test_avg_monthly": -0.0029053767750294446,
+    "cost_gap": 0.0038944641289793136
+  }
+}

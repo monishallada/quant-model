@@ -202,3 +202,45 @@ class TestRiskGate:
         res = _run(HugeBet())
         assert res.diagnostics["risk_blocked"] >= 1
         assert len(res.trades) == 0
+
+
+class TestCreditStop:
+    """A short spread's stop must fire when liability reaches Nx the credit —
+    the positive-entry ratio stop is structurally blind to credit positions."""
+
+    KEY_S = OptionKey(underlying="SPXW", expiry=SESSION, right=OptionRight.PUT, strike=5900)
+    KEY_W = OptionKey(underlying="SPXW", expiry=SESSION, right=OptionRight.PUT, strike=5875)
+
+    def _frames(self):
+        idx = pd.date_range(datetime.combine(SESSION, time(9, 30)), periods=390, freq="1min")
+        # short leg premium EXPLODES mid-day (adverse move); wing follows less
+        s_bid = np.where(np.arange(390) < 120, 0.80, 4.00)
+        w_bid = np.where(np.arange(390) < 120, 0.30, 1.20)
+        return {
+            (self.KEY_S, SESSION): pd.DataFrame({"bid": s_bid, "ask": s_bid + 0.10}, index=idx),
+            (self.KEY_W, SESSION): pd.DataFrame({"bid": w_bid, "ask": w_bid + 0.10}, index=idx),
+        }
+
+    def test_liability_multiple_stop_fires(self):
+        ks, kw = self.KEY_S, self.KEY_W
+        class ShortSpread(IntradayStrategy):
+            name = "credit_test"
+            def session_universe(self, session): return ["SPY"]
+            def on_minute(self, ctx):
+                if ctx.now.time() != time(10, 0):
+                    return []
+                return [ProposedTrade(
+                    engine=self.name, catalyst_ref="SPXW:x",
+                    legs=[OrderLeg(key=ks, side=Side.SELL, qty=1),
+                          OrderLeg(key=kw, side=Side.BUY, qty=1)],
+                    unit_cost=-0.45, unit_max_loss=25 - 0.45,
+                    direction=Direction.NEUTRAL,
+                    exit_rules=ExitRules(use_stops=True, stop_loss_pct=-3.0,
+                                         close_by_time=time(15, 55)),
+                    per_trade_risk_fraction=0.03)]
+        res = _run(ShortSpread(), oq=self._frames())
+        assert len(res.trades) == 1
+        t = res.trades[0]
+        assert t.exit_reason == "credit_stop", f"got {t.exit_reason}"
+        assert t.exit_time.time() <= time(11, 35), "stop must fire when liability jumps"
+        assert t.pnl < 0

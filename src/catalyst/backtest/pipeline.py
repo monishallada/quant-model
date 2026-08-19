@@ -140,9 +140,14 @@ class Pipeline:
                 profile = "zero" if zero else "real"
                 results = self._execute_all(strategy, s, e, zero_cost=zero, label=seg)
 
-                # The headline segment comes from the NATIVE engine: it is the
-                # only one that applied risk sizing, the cost model and exits.
-                native = next((r for r in results if r.engine == "native"), None)
+                # The headline segment comes from the reference engine — the
+                # first in the cadence-selected family (native for daily,
+                # intraday_native for minute strategies). Matching the literal
+                # name "native" silently dropped every intraday segment and
+                # reported NO RESULT after a clean 8-hour run.
+                native = next((r for r in results
+                               if r.engine in ("native", "intraday_native") and r.ok),
+                              None)
                 if native is not None:
                     report.segments.append(
                         build_segment(seg, profile, native.equity, native.trades))

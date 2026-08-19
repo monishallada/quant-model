@@ -23,7 +23,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import pandas as pd
 
@@ -39,6 +39,11 @@ class IntradayContext:
     now: datetime                      # decision time ts (ET, tz-naive)
     bars: Mapping[str, pd.DataFrame]   # VISIBLE bars only: labels <= now - 1min
     data: Any = None                   # DataSource, for prior-session chain context
+    #: Engine-injected, read-only: latest visible NBBO (bid, ask) for one
+    #: option contract, at or before now-1min. Selection may LOOK at quotes;
+    #: pricing, filling and sizing stay engine-side — the wall holds. None
+    #: when the engine provides no options data (pure-equity runs, tests).
+    option_quote: Callable[[Any], tuple[float, float] | None] | None = None
 
     def spot(self, symbol: str) -> float | None:
         """Last visible close — the freshest price a decision may use."""

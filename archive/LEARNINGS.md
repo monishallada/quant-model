@@ -123,6 +123,54 @@ The exhaustive all-options design search. Findings that stand:
 |---|---|---|
 | v11 ASCENT — 6-name m1.20 calls, static ~50% | OPTIONS | +11.11% (lottery-flagged, maxDD -82%) |
 
+## v12 E1 kill (2026-08-19) — intraday time-series momentum does not survive
+
+The best-documented intraday equity effect (GHLZ first-half-hour -> last-half-
+hour, JFE 2018) tested on 5,314 SPY/QQQ symbol-days, 2016-2026, point-in-time:
+
+- Regression REAL: t=4.13, sign-consistent halves (+2.21/+3.42), random
+  control clean (+0.18). The relationship exists.
+- Tradeable translation FAILS: Spearman IC is NEGATIVE (-0.020, not monotone);
+  sign-following = -0.5..+0.7 bps/trade vs 1.5bps cost; hit rate 49.6%.
+- Honest expanding-window forecast-filtered version: SPY -2.33 bps/trade net
+  (t=-1.46), QQQ -2.37 (t=-1.75). Both negative.
+- The one positive cell (high-RV tercile +4.1bps, t=1.41) sits beside a
+  wrong-signed "significant" neighbor (-4.4bps, t=-3.67): cell-mining bait.
+
+RULE: a regression t-stat is not a strategy. Monotonicity (rank IC) and the
+net-of-cost sign-following translation must BOTH pass before any build.
+
+## v12 equity-alpha gates (2026-08-19) — the full intraday equity shortlist is dead
+
+Every literature-ranked intraday equity candidate was gated with pre-specified
+rules, random controls and net-of-cost hurdles. All died:
+
+| Candidate | Pre-specified result | Verdict |
+|---|---|---|
+| E1 first-30min -> last-30min momentum | -2.3bps/trade net both symbols (expanding-window, forecast-filtered) | DEAD - decayed post-publication |
+| E3 in-play continuation (gap>=2% + 3x relvol) | -48bps/trade, t=-1.5, n=73; the relvol condition FLIPS the sign | DEAD - gap-only variant (+12.6bps, t=1.94) fails the gate AND would be post-hoc |
+| E4 post-FOMC/CPI drift | FOMC t=0.41, CPI wrong-signed, pooled t=0.05, n=183 | DEAD - underpowered exactly as warned |
+| E5 gap-conditioned open behavior | t=-0.02 / -0.08 on both pre-specified arms, n=4,251 | DEAD - flat zero |
+
+With E2 (vol-gating) being only an overlay, the intraday EQUITY book is empty,
+honestly. This extends the original coin-flip rule: intraday equity direction
+has no measurable edge on this data at ANY horizon or conditioning the
+2018-2026 literature offered, after costs. The one intraday candidate left
+standing is the one that never needed a direction: short structural variance
+premium (O1).
+
+## v12 O1 verdict (2026-08-19) — the 0DTE premium is real and unreachable
+
+Full 2016-2026, N=1,992, one SPXW put credit spread/session, real minute NBBO:
+gross +0.21%/mo (PF 1.16, 73% win, concentration 4-5% — a genuine thin premium,
+not a lottery). Real-cost: -0.18%/mo; OOS -0.29%/mo. Fill frontier: break-even
+at ~45% of quoted spread; +0.16%/mo at 20%; -0.19%/mo at 100%.
+
+RULE: the index variance premium (EOD v8, intraday v12) is consistently real,
+thin, and consumed by the spread at retail access. Reviving any version of it
+requires a MEASURED effective/quoted execution ratio <=45% at the actual
+broker — never an assumed one, and never another backtest.
+
 ## Rules earned the hard way — do not re-test these
 
 | Rule | Evidence |

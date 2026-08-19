@@ -162,7 +162,9 @@ class IntradayBacktester:
             # -- entries ---------------------------------------------------
             if ts.time() < p.eod_flatten:
                 ctx = IntradayContext(session=session, now=ts, bars=visible,
-                                      data=self._data)
+                                      data=self._data,
+                                      option_quote=self._make_quote_fn(
+                                          option_frames, session, ts, diag))
                 for strat in strategies:
                     for proposal in (strat.on_minute(ctx) or []):
                         sym = proposal.legs[0].key.underlying
@@ -183,6 +185,30 @@ class IntradayBacktester:
                           reason="eod_flatten")
 
     # ------------------------------------------------------------------
+    def _make_quote_fn(self, option_frames, session, ts, diag):
+        """Read-only quote access for strategy SELECTION.
+
+        Same leak discipline as bars: only quotes at or before ts-1min are
+        visible to a decision at ts. First touch of a contract fetches its
+        whole cached day-frame (0.6s cold, free warm) — counted, because
+        request volume is a real budget."""
+        from datetime import timedelta as _td
+
+        def quote(key):
+            if key not in option_frames:
+                frame = self._oq.contract_day(key, session, SESSION_OPEN, SESSION_CLOSE)
+                option_frames[key] = frame if frame is not None else pd.DataFrame()
+                diag["quote_fetches"] = diag.get("quote_fetches", 0) + 1
+            frame = option_frames[key]
+            if frame.empty:
+                return None
+            rows = frame[frame.index <= ts - _td(minutes=1)]
+            if rows.empty:
+                return None
+            bid, ask = float(rows["bid"].iloc[-1]), float(rows["ask"].iloc[-1])
+            return (bid, ask) if ask > 0 else None
+        return quote
+
     def _equity_fill_quotes(self, day_bars, ts):
         """Executable market at ts: the ts-labeled bar's OPEN ± half spread —
         the first tradeable print after a decision made on bars <= ts-1min."""
@@ -289,6 +315,15 @@ class IntradayBacktester:
                   and pos.entry_price > 0 and pos.current_value > 0
                   and pos.current_value / pos.entry_price - 1.0 <= rules.stop_loss_pct):
                 reason = "stop_loss"
+            elif (rules.use_stops and rules.stop_loss_pct is not None
+                  and pos.entry_price < 0
+                  and pos.current_value <= pos.entry_price * abs(rules.stop_loss_pct)):
+                # CREDIT structures: entry_price is the credit received
+                # (negative). The ratio guard above can never fire for them —
+                # its entry_price>0 gate exists precisely because dividing by a
+                # negative flips the inequality. Here: liability (-mark) has
+                # reached |stop_loss_pct| x the credit received.
+                reason = "credit_stop"
             elif (rules.use_stops and rules.trail_stop_pct is not None
                   and pos.high_water_value > 0 and pos.current_value > 0
                   and pos.current_value / pos.high_water_value - 1.0
