@@ -363,6 +363,10 @@ class FillModelConfig(_FrozenModel):
     # of the percentage term. Defaults to 0.0 so every existing config and the
     # archived campaigns behave exactly as before.
     slippage_per_contract: float = Field(default=0.0, ge=0.0)
+    # Equity all-in slippage per side (bps) on top of worse-side crossing.
+    # Default is the measured liquid-large-cap figure this project has always
+    # used; the zero-cost twin zeroes it like every other friction.
+    equity_slippage_bps: float = Field(default=3.5, ge=0.0)
 
 
 class CommissionsConfig(_FrozenModel):

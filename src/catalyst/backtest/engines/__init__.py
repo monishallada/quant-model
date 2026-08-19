@@ -3,6 +3,7 @@
 from catalyst.backtest.engines.lean import LeanEngine, ThetaToLeanWriter
 from catalyst.backtest.engines.lean_docker import LeanDockerEngine
 from catalyst.backtest.engines.native import NativeEngine
+from catalyst.backtest.engines.intraday_native import IntradayNativeEngine
 from catalyst.backtest.engines.nautilus import NautilusEngine
 
 #: The default flow is the NATIVE engine alone — the validated pipeline every
@@ -20,7 +21,8 @@ DEFAULT_ENGINES = ("native",)
 #: Opt in explicitly when a strategy is one the second engines can mirror.
 ALL_ENGINES = ("native", "nautilus", "lean")
 
-_REGISTRY = {"native": NativeEngine, "nautilus": NautilusEngine,
+_REGISTRY = {"native": NativeEngine, "intraday_native": IntradayNativeEngine,
+             "nautilus": NautilusEngine,
              "lean": LeanDockerEngine, "lean_cli": LeanEngine}
 
 
@@ -34,6 +36,6 @@ def build_engines(names=DEFAULT_ENGINES):
     return out
 
 
-__all__ = ["ALL_ENGINES", "DEFAULT_ENGINES", "LeanDockerEngine", "LeanEngine", "NativeEngine",
+__all__ = ["ALL_ENGINES", "DEFAULT_ENGINES", "IntradayNativeEngine", "LeanDockerEngine", "LeanEngine", "NativeEngine",
            "NautilusEngine",
            "ThetaToLeanWriter", "build_engines"]

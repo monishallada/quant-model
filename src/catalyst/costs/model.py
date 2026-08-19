@@ -103,16 +103,12 @@ class NBBOCostModel(CostModel):
         self._assert_not_better_than_nbbo(price, contract, side)
         return Fill(price=price, commission=self._commissions.per_contract * abs(contracts))
 
-    #: Equity all-in slippage in bps per side on top of worse-side crossing —
-    #: liquid US large caps; the measured figure this project has always used.
-    EQUITY_SLIPPAGE_BPS = 3.5
-
     def equity_fill(self, bid: float, ask: float, side: Side, shares: int) -> Fill:
         if bid <= 0 or ask <= 0 or ask < bid:
             raise ValueError(f"unusable equity quote bid={bid} ask={ask}")
         mid = (bid + ask) / 2.0
         frac = self._fill.spread_fill_fraction
-        slip = self.EQUITY_SLIPPAGE_BPS / 1e4
+        slip = self._fill.equity_slippage_bps / 1e4
         if side is Side.BUY:
             price = (mid + frac * (ask - mid)) * (1.0 + slip)
             if price < mid:

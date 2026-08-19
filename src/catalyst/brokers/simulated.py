@@ -135,6 +135,19 @@ class SimulatedBroker(Broker):
             logger.warning("Position %s expired in simulation; settled at intrinsic %.2f", pid, value)
             del self._positions[pid]
 
+    def force_close(self, position_id: str, value_per_unit: float) -> None:
+        """Settle a position at an externally determined per-unit value.
+
+        Exists ONLY for the intraday engine's flagged synthetic-fill path
+        (mandatory EOD flatten with no live quote). Callers must count every
+        use — an unflagged force_close is a fabricated fill.
+        """
+        pos = self._positions.pop(position_id, None)
+        if pos is None:
+            return
+        self.cash += value_per_unit * pos.qty * pos.multiplier
+        pos.realized_pnl += (value_per_unit - pos.entry_price) * pos.qty * pos.multiplier
+
     # ------------------------------------------------------------------
     # Fill modeling
     # ------------------------------------------------------------------

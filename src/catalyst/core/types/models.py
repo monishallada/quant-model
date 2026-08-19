@@ -8,7 +8,7 @@ their adapters and never leak past them.
 from __future__ import annotations
 
 import enum
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -227,6 +227,10 @@ class ExitRules(_Model):
     #   or catalyst + N days) — never held past this
     max_hold_trading_days: int | None = None
     close_before_expiry_days: int = 1
+    # -- intraday (interpreted by the IntradayBacktester at minute resolution;
+    #    None = not an intraday position, zero behavioral change elsewhere) --
+    close_by_time: time | None = None      # mandatory flatten at this ET time
+    max_hold_minutes: int | None = None    # hard time stop from entry
 
 
 class OrderLeg(_Model):

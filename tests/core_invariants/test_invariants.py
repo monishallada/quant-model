@@ -189,6 +189,7 @@ class TestOnlyOnePathToTheBroker:
         "brokers/alpaca.py",
         "brokers/schwab.py",
         "backtest/backtester.py",   # drives SimulatedBroker inside the pipeline
+        "backtest/intraday.py",     # the minute-resolution engine, same category
     }
 
     #: Archived campaigns that predate the pipeline and carry their own loop.

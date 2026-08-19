@@ -42,6 +42,9 @@ class Cadence(str, Enum):
     CATALYST = "catalyst"
     SCHEDULED = "scheduled"
     DAILY = "daily"
+    #: Minute-resolution decision points inside the session; driven by the
+    #: IntradayBacktester, not the daily loop.
+    INTRADAY = "intraday"
 
 
 @dataclass(frozen=True)

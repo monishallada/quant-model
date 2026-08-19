@@ -82,6 +82,7 @@ class Pipeline:
         object.__setattr__(cfg.execution.fill_model, "spread_fill_fraction", 0.0)
         object.__setattr__(cfg.execution.fill_model, "slippage_pct_of_premium", 0.0)
         object.__setattr__(cfg.execution.fill_model, "slippage_per_contract", 0.0)
+        object.__setattr__(cfg.execution.fill_model, "equity_slippage_bps", 0.0)
         object.__setattr__(cfg.execution.commissions, "alpaca_per_contract", 0.0)
         object.__setattr__(cfg.execution.commissions,
                            "schwab_per_contract_per_leg", 0.0)
@@ -97,7 +98,7 @@ class Pipeline:
         """
         cfg = self._zeroed(self._cfg) if zero_cost else self._cfg
         results: list[EngineResult] = []
-        for engine in self._engines:
+        for engine in self._engines_for(strategy):
             ok, reason = engine.available()
             if not ok:
                 results.append(EngineResult(engine=engine.name, error=reason))
@@ -107,6 +108,20 @@ class Pipeline:
                 catalysts=self._catalysts, screener=self._screener,
                 zero_cost=zero_cost))
         return results
+
+    def _engines_for(self, strategy) -> list:
+        """Cadence picks the engine family; the honesty machinery is shared.
+
+        An INTRADAY strategy on the daily engine would silently trade nothing
+        (no opportunities at the daily cadence) and report a clean zero — the
+        exact green-but-meaningless failure this project keeps refusing to
+        ship. Route by cadence instead."""
+        from catalyst.backtest.engines import IntradayNativeEngine
+        from catalyst.core.interfaces.strategy import Cadence
+
+        if getattr(strategy, "cadence", None) is Cadence.INTRADAY:
+            return [IntradayNativeEngine()]
+        return self._engines
 
     # -- the mandatory sequence -------------------------------------------
     def run(self, strategy: Strategy, start: date, end: date) -> StrategyReport:
