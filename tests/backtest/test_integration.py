@@ -33,6 +33,14 @@ from catalyst.screener.catalyst_screener import CatalystScreener
 from tests.conftest import build_chain
 
 CFG = load_config("backtest")
+# Mechanism tests: pin the risk policy explicitly (the backtest profile is an
+# unconstrained research profile; without the sizing buffer these assertions
+# on realized-spend-within-budget lose the very mechanism they pin).
+CFG = CFG.model_copy(update={"risk": CFG.risk.model_copy(update={
+    "cash_floor_fraction": 0.40, "max_deployed": 0.25,
+    "sizing_cost_buffer": 0.05, "daily_loss_halt": -0.08,
+    "weekly_loss_halt": -0.15, "max_correlated_positions": 3,
+    "correlation_threshold": 0.7})})
 EXPIRIES = [date(2024, 6, 21), date(2024, 7, 19), date(2024, 8, 16)]
 CATALYST = Catalyst(
     symbol="SPY", type=CatalystType.OTHER, when=datetime(2024, 6, 12, 16), source="test"

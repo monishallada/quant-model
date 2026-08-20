@@ -90,9 +90,13 @@ class YFinanceEarnings:
 
         try:
             raw = yf.Ticker(symbol).get_earnings_dates(limit=100)
-        except Exception as exc:  # noqa: BLE001 — vendor scrape; degrade to empty
-            logger.warning("yfinance earnings fetch failed for %s: %s", symbol, exc)
-            raw = None
+        except Exception as exc:  # noqa: BLE001 — vendor scrape
+            # AUDIT CRITICAL class: a scrape failure cached as "no earnings"
+            # would silently delete this symbol's catalysts from every future
+            # backtest. Degrade for THIS call only; never cache the failure.
+            logger.warning("yfinance earnings fetch failed for %s: %s (NOT cached)",
+                           symbol, exc)
+            return pd.DataFrame(columns=["when", "eps_estimate", "eps_actual"])
         if raw is None or raw.empty:
             df = pd.DataFrame(columns=["when", "eps_estimate", "eps_actual"])
         else:

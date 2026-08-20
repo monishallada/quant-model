@@ -85,7 +85,9 @@ class AlpacaDailyBars:
                 params["page_token"] = page_token
             payload = self._get_with_retry(symbol, params)
             if payload is None:
-                break
+                # AUDIT HIGH: transient failure — never cache a truncated pull.
+                logger.warning("Bars pull failed mid-pagination (NOT cached)")
+                return pd.DataFrame()
             for bar in payload.get("bars") or []:
                 rows.append(
                     {

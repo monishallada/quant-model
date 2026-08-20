@@ -138,6 +138,8 @@ class RiskManager:
         # has a negative unit_cost (premium received) but a real, positive max
         # loss (width - credit) that must be reserved exactly like a debit —
         # which is also how a broker margins it.
+        if proposal.unit_max_loss != proposal.unit_max_loss:  # NaN guard
+            return GateDecision(0, "non-finite max loss")
         if proposal.unit_max_loss <= 0:
             return GateDecision(0, "non-positive max loss")
         if proposal.unit_cost != proposal.unit_cost:  # NaN guard

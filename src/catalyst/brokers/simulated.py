@@ -57,6 +57,15 @@ class SimulatedBroker(Broker):
         self._positions: dict[str, Position] = {}
         self._chains: dict[str, OptionChain] = {}
         self._equity_quotes: dict[str, tuple[float, float]] = {}
+        # underlying -> {date: spot}, last few sessions. A single last-spot
+        # tuple was overwritten by the NEXT session's chain in update_market
+        # BEFORE _settle_expired ran, so the expiry-day guard could never
+        # match precisely when a chain was fetched (verifier catch).
+        self._spot_by_date: dict[str, dict] = {}
+        #: settlement telemetry: (position_id, per-unit value, realized pnl $)
+        #: — the trade-record layer reconciles against THIS, not against a
+        #: guess (audit MEDIUM: deep-ITM settles were recorded as -$1.30).
+        self.settlements: list[tuple[str, float, float]] = []
         self._now: datetime | None = None
         self._order_seq = 0
         self.total_commissions = 0.0
@@ -76,6 +85,12 @@ class SimulatedBroker(Broker):
         self._chains = chains
         if equity_quotes is not None:
             self._equity_quotes = equity_quotes
+        for u, ch in chains.items():
+            if ch.underlying_price and ch.underlying_price > 0:
+                hist = self._spot_by_date.setdefault(u, {})
+                hist[now.date()] = ch.underlying_price
+                for d in sorted(hist)[:-5]:      # keep a short window
+                    del hist[d]
         self._now = now
         for pos in list(self._positions.values()):
             self._mark_position(pos)
@@ -119,6 +134,12 @@ class SimulatedBroker(Broker):
                 continue
             chain = self._chains.get(pos.underlying)
             spot = chain.underlying_price if chain else None
+            # AUDIT MEDIUM: settling with the NEXT session's spot fabricates
+            # the overnight gap into the settlement. Prefer the spot we saw ON
+            # the expiry date.
+            on_expiry = self._spot_by_date.get(pos.underlying, {}).get(expiry)
+            if on_expiry and on_expiry > 0:
+                spot = on_expiry
             value = 0.0
             if spot is not None:
                 for leg in pos.legs:
@@ -131,7 +152,9 @@ class SimulatedBroker(Broker):
                 logger.warning("Settling %s at last mark; no spot for %s", pid, pos.underlying)
                 value = pos.current_value
             self.cash += value * pos.qty * pos.multiplier
-            pos.realized_pnl += (value - pos.entry_price) * pos.qty * pos.multiplier
+            settle_pnl = (value - pos.entry_price) * pos.qty * pos.multiplier
+            pos.realized_pnl += settle_pnl
+            self.settlements.append((pid, value, settle_pnl))
             logger.warning("Position %s expired in simulation; settled at intrinsic %.2f", pid, value)
             del self._positions[pid]
 
@@ -169,7 +192,11 @@ class SimulatedBroker(Broker):
                 continue
             chain = self._chains.get(leg.key.underlying)
             contract = chain.find(leg.key) if chain else None
-            if contract is None or contract.ask <= 0 or contract.bid < 0:
+            # NaN guard is explicit: NaN <= 0 is False, so NaN quotes sailed
+            # through and "filled" (audit MEDIUM).
+            if (contract is None or contract.ask != contract.ask
+                    or contract.bid != contract.bid
+                    or contract.ask <= 0 or contract.bid < 0):
                 return None
             prices[i] = self._cost_model.leg_fill(contract, leg.side, leg.qty).price
         return prices
@@ -207,6 +234,11 @@ class SimulatedBroker(Broker):
             if self.cash + cash_flow < 0:
                 return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
                                    message="Insufficient cash (broker-level guard)")
+            # Unit semantics: units = gcd of leg quantities; legs are stored as
+            # per-unit ratios. An unreduced proposal (2x/4x sized to 3) is thus
+            # recorded as 6 units of a (1x/2x) structure at half the per-unit
+            # price — internally consistent (cash, marks, ratio exits all use
+            # the same basis); TradeRecord qty/prices are in THESE units.
             units = reduce(math.gcd, (leg.qty for leg in order.legs))
             unit_net = -cash_flow_ex_commission(cash_flow, commission) / (units * order.multiplier)
             pos = Position(
@@ -230,6 +262,12 @@ class SimulatedBroker(Broker):
             self.cash += cash_flow
             self.total_commissions += commission
             self._mark_position(pos)
+            # AUDIT LOW: high-water was seeded with the FILL (mid + crossing +
+            # slippage) while marks are mid-based, so the first mark sat ~cost
+            # drag below high water and tight trails fired instantly in a flat
+            # market. Anchor the trail at the first mark instead.
+            if pos.current_value == pos.current_value:  # not NaN
+                pos.high_water_value = pos.current_value
             return OrderResult(
                 order_id=order_id, status=OrderStatus.FILLED, filled_qty=units,
                 avg_fill_price=unit_net, commission=commission,

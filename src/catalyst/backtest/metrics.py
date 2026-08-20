@@ -63,10 +63,19 @@ def sortino(daily_returns: pd.Series) -> float:
     return float(daily_returns.mean() / downside_std * math.sqrt(TRADING_DAYS_PER_YEAR))
 
 
+def _years_spanned(equity: pd.Series) -> float:
+    """Elapsed years from DATES when available — the row-count bug class
+    (audit MEDIUM: a 16-mark curve spanning one year read as 16 days)."""
+    idx = equity.index
+    if isinstance(idx, pd.DatetimeIndex) and len(idx) > 1:
+        return (idx[-1] - idx[0]).days / 365.25
+    return len(equity) / TRADING_DAYS_PER_YEAR
+
+
 def calmar(equity: pd.Series) -> float:
     if len(equity) < 2:
         return 0.0
-    years = len(equity) / TRADING_DAYS_PER_YEAR
+    years = _years_spanned(equity)
     if years <= 0 or equity.iloc[0] <= 0:
         return 0.0
     cagr = (equity.iloc[-1] / equity.iloc[0]) ** (1.0 / years) - 1.0
@@ -111,7 +120,7 @@ def monthly_return_series(equity: pd.Series) -> pd.Series:
 def headline(equity: pd.Series) -> dict[str, float]:
     """The standard header block every strategy report leads with."""
     monthly = monthly_return_series(equity)
-    years = len(equity) / TRADING_DAYS_PER_YEAR
+    years = _years_spanned(equity)
     cagr = ((equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1.0) if years > 0 and len(equity) > 1 else 0.0
     return {
         "avg_monthly_return": avg_monthly_return(equity),

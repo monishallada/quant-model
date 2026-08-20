@@ -204,6 +204,85 @@ accessible universe; a ~500-name earnings calendar + daily-bars expansion
 (survivorship-managed) is the prerequisite, not more analysis of 7 names.
 TSLA is the outlier the other direction (-58bps/event, n=35).
 
+## v13 EOD-reversal kill (2026-08-20) — the control earned its keep
+
+End-of-day cross-sectional reversal (Baltussen/Da/Soebhag 2024: ~8bps/day from
+the loser leg), gated on 40 liquid large caps x 2,125 sessions, pre-specified:
+LONG losers -9.70bps/day net (10bps RT) vs SHUFFLED-NAME CONTROL -9.85bps/day
+— the selection adds ~0.15bps/day over random, i.e. NOTHING. The published
+effect is absent in large caps 2018-2026. DEAD. Note the reading discipline:
+a big negative net number next to an equally negative control means "no
+signal, just costs" — not "signal drowned by costs".
+
+## v13 EAP at scale (2026-08-20) — the premium evaporates; the search is complete
+
+The 7-name gate showed +37bps/event (t=0.81). At 30x the sample — 227 names,
+7,371 events, same pre-specified test — the premium is **+6.3bps/event net,
+t=1.09, win rate 50.1%, median +1.4bps** against ±780bps tails. The mega-cap
++37bps was small-sample noise. Even at face value the full book is ~2.7%/yr.
+DEAD at any meaningful magnitude.
+
+**This resolves the last candidate of the 2020-2026 frontier scan.** Final
+tally across v1-v13 (~14 campaigns, every options structure, every documented
+intraday effect, every calendar/flow mechanism accessible to this data):
+
+- DEAD at gates: intraday momentum, in-play continuation, FOMC/CPI drift,
+  gap-conditioned open, EOD reversal (control-equivalent), EAP (at scale),
+  all long-options structures, catalyst strangles, pairs, kinetic, drift
+- REAL BUT UNTRADEABLE: 60/40 rebalancing flow (t=-4.4, no translation),
+  0DTE variance premium (gross +0.21%/mo, spread-consumed, breakeven at
+  45% crossing), index VRP EOD (same, v8)
+- SURVIVORS: cross-sectional momentum SHARES +1.39%/mo (v5, the only
+  gate-passer in project history); equal-weight mega-cap beta +2.88%/mo
+  (concentration-flagged)
+
+The frontier of this data, honestly measured, is 1-3%/month in shares.
+## v13 adversarial engine audit (2026-08-20) — 46 findings, 2 CRITICAL, 7 HIGH
+
+Four adversarial auditors with mandatory repros swept the entire stack. All
+CRITICAL/HIGH findings confirmed and FIXED, each with a regression test
+(tests/audit/):
+
+| Fixed | Finding |
+|---|---|
+| CRITICAL | ThetaData terminal session death (478) failed every request; restarted + client now aborts loudly on 478 instead of degrading per-request |
+| CRITICAL | Transient fetch failures were CACHED as permanent "no data" (options minute, equity bars, earnings) — poisoning all future backtests; failures now never cached |
+| HIGH | Partial pagination cached as a complete day/range |
+| HIGH | Half-days: engine traded forward-filled phantom quotes up to 3h after the 13:00 close; everything now clamps to the real exchange close |
+| HIGH | Rejected exits popped state -> zombie positions + doubled exposure; state now pops only on fill |
+| HIGH | Missing test segment -> verdict fell back to IN-SAMPLE data labeled "out-of-sample" and could grant validated=True; now NO RESULT + promotion refuses |
+| HIGH | Daily backtester handed FULL-window history to strategy contexts (lookahead); now sliced strictly before session |
+| HIGH | Covered-call lab resurrected the split-mixing bug; results/persymbol flagged CONTAMINATED (TSLA covered-calls +56% CAGR is an artifact) |
+| MEDIUM | headline()/calmar() still derived years from row count; "real-cost" runs charged $0 option commissions (alpaca profile); intraday TradeRecord pnl excluded commissions |
+
+CONTAMINATION NOTES for prior results: (1) results/persymbol covered-call
+numbers are artifacts (flagged in-file). (2) The pipeline runs of long_options
+(v12 era) were exposed to the full-history context lookahead via the momentum
+direction read — the v9 STANDALONE results (used for ASCENT's DP) sliced
+correctly and stand. (3) O1's odte_premium is unaffected (no ctx.history use;
+quote-visibility was verified <= ts-1min) except its "real-cost" runs charged
+$0 commissions — adding $0.65/contract/side worsens the already-REJECT verdict.
+
+RULE: an engine is never "done" — schedule adversarial audits with mandatory
+repros after every major build. Self-assessment found none of these.
+
+## v13 audit closure (2026-08-20) — every finding fixed, exploit-verified
+
+All 46 audit findings resolved: 2 CRITICAL + 7 HIGH (round 1), 18 remaining
+MEDIUM/LOW (round 2), then an adversarial verification pass re-ran the
+auditors' own exploit scripts against the fixed code: 11/13 verified on the
+first pass and the verifier caught TWO fixes that were themselves subtly
+wrong — entry commissions computed from pos.qty AFTER the broker zeroed it
+(always $0), and the expiry-day spot overwritten by the next session's chain
+before settlement ran. Both re-fixed with ledger-reconciliation regression
+tests. Final: 524 tests; sum(TradeRecord.pnl) == ledger equity change to the
+cent; determinism verified under three hash seeds; NaN immunity end-to-end;
+lookahead wall enforced on every data path incl. the raw handle.
+
+RULE: verify fixes by re-running the exploit, not by re-reading the code.
+Two of nine fixes were wrong in ways code review missed and the exploit
+caught instantly.
+
 ## Rules earned the hard way — do not re-test these
 
 | Rule | Evidence |

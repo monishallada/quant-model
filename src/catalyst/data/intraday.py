@@ -102,7 +102,16 @@ class AlpacaMinuteBars:
                 params["page_token"] = page_token
             payload = _request_with_retry(self._http, symbol, params)
             if payload is None:
-                break
+                if page_token:
+                    # AUDIT HIGH: page 1 succeeded, a later page failed — a
+                    # truncated (e.g. morning-only) day cached as complete
+                    # distorts every signal, fill and flatten that reads it.
+                    logger.warning("Pagination failed mid-day for %s %s (NOT cached)",
+                                   symbol, key)
+                    return pd.DataFrame(columns=_BAR_COLUMNS)
+                # First request failed outright: transient — do not cache.
+                logger.warning("Bars fetch failed for %s %s (NOT cached)", symbol, key)
+                return pd.DataFrame(columns=_BAR_COLUMNS)
             for bar in payload.get("bars") or []:
                 rows.append({
                     "ts": pd.Timestamp(bar["t"]).tz_convert(_ET).tz_localize(None),
@@ -218,8 +227,14 @@ class ThetaMinuteQuotes:
                     },
                 )
             except ThetaDataError as exc:
-                logger.warning("Minute quotes failed for %s on %s: %s", key, day, exc)
-                cached = pd.DataFrame()
+                # AUDIT CRITICAL: a transient failure (rate limit, dead
+                # session/478, network) must NEVER be cached — an empty frame
+                # under this key is indistinguishable from "market has no
+                # data" and would mask real quotes from every future backtest
+                # even after the vendor recovers.
+                logger.warning("Minute quotes failed for %s on %s: %s (NOT cached)",
+                               key, day, exc)
+                return pd.DataFrame(columns=["bid", "ask"])
             self._cache.put("theta_minute_quote", cache_key, cached)
         if cached.empty:
             return pd.DataFrame(columns=["bid", "ask"])

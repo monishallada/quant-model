@@ -99,9 +99,12 @@ class StrategyReport:
         if self.engines_diverge:
             return ("HOLD — engines disagree on the P&L; resolve before "
                     "reading any number here")
-        test = self.get("test", "real") or self.get("full", "real")
+        # AUDIT HIGH: never fall back to the FULL segment — that is 70%
+        # training data wearing an out-of-sample label, and it once granted
+        # validated=True from an in-sample number. No test segment, no verdict.
+        test = self.get("test", "real")
         if test is None:
-            return "NO RESULT"
+            return "NO RESULT — test segment missing; nothing here is out-of-sample"
         annual = (1.0 + test.avg_monthly_return) ** 12 - 1.0
         if test.n_trades == 0:
             return "NO TRADES"

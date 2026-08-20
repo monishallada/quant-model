@@ -71,3 +71,22 @@ def sessions_in_range(start: date, end: date) -> list[date]:
     lo = bisect.bisect_left(days, start)
     hi = bisect.bisect_right(days, end)
     return days[lo:hi]
+
+
+def session_close_time(day: date):
+    """ET close time for a session (13:00 on early-close days, else 16:00).
+
+    AUDIT HIGH: engines that assume 16:00 on half days trade phantom
+    liquidity — ThetaData forward-fills the frozen 13:00 NBBO to 16:00, so
+    stale-quote guards can never fire, and Alpaca post-market bars keep
+    filling equity orders hours after the floor closed.
+    """
+    from datetime import time as _time
+    import pandas as _pd
+
+    nyse = mcal.get_calendar("NYSE")
+    sched = nyse.schedule(start_date=day, end_date=day)
+    if sched.empty:
+        return _time(16, 0)
+    close_et = sched["market_close"].iloc[0].tz_convert("America/New_York")
+    return close_et.time()

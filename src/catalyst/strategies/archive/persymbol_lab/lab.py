@@ -95,19 +95,26 @@ def covered_calls(
     curve: dict[pd.Timestamp, float] = {}
     n_trades = wins = 0
     i = 0
-    open_call: tuple[date, float, float] | None = None  # (expiry, strike, credit)
+    # (expiry, strike, credit, raw_over_adj). AUDIT HIGH fix: strikes and chain
+    # quotes are RAW as-of-date terms; the price series is split-ADJUSTED.
+    # Direct comparison resurrected the split-mixing bug on pre-split names
+    # (assignment never fired, liability always zero, premium credited on
+    # many-times-oversized contract counts). All raw-terms math now converts
+    # through the ratio captured from the chain's own spot at entry.
+    open_call: tuple[date, float, float, float] | None = None
 
     while i < len(dates):
         ts = dates[i]
         today = ts.date()
-        spot = float(px.loc[ts])
+        spot = float(px.loc[ts])            # ADJUSTED series
 
-        # Settle an expiring call.
+        # Settle an expiring call (raw terms).
         if open_call and today >= open_call[0]:
-            expiry, strike, credit = open_call
+            expiry, strike, credit, ratio = open_call
+            raw_spot = spot * ratio
             n_trades += 1
-            if spot > strike:  # assigned: shares sold at strike, repurchased at market
-                proceeds = shares * strike * (1 - SHARE_COST_BPS)
+            if raw_spot > strike:  # assigned: sold at strike, repurchased at market
+                proceeds = (shares / ratio) * strike * (1 - SHARE_COST_BPS)
                 shares = (proceeds * (1 - SHARE_COST_BPS)) / spot
             else:
                 wins += 1  # expired worthless, full premium kept
@@ -122,18 +129,20 @@ def covered_calls(
                 except DataUnavailableError:
                     continue
                 leg = nearest_delta(chain, expiry, OptionRight.CALL, cfg.covered_call_delta)
-                if leg and leg.bid > 0:
-                    contracts = max(int(shares // 100), 0)
+                if leg and leg.bid > 0 and chain.underlying_price > 0 and spot > 0:
+                    ratio = chain.underlying_price / spot     # raw / adjusted
+                    contracts = max(int((shares / ratio) // 100), 0)
                     if contracts >= 1:
                         cash += leg.bid * contracts * 100.0   # sold at the BID
-                        open_call = (expiry, leg.key.strike, leg.bid)
+                        open_call = (expiry, leg.key.strike, leg.bid, ratio)
                     break
 
-        # Mark: shares plus cash minus the liability of the short call.
+        # Mark: shares + cash - short-call liability (raw terms).
         liability = 0.0
         if open_call:
-            expiry, strike, _ = open_call
-            liability = max(spot - strike, 0.0) * max(int(shares // 100), 0) * 100.0
+            expiry, strike, _, ratio = open_call
+            contracts = max(int((shares / ratio) // 100), 0)
+            liability = max(spot * ratio - strike, 0.0) * contracts * 100.0
         curve[ts] = shares * spot + cash - liability
         i += 1
 

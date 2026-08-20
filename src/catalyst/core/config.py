@@ -341,11 +341,11 @@ class RiskConfig(_FrozenModel):
     loosened at runtime — the models are immutable by construction.
     """
 
-    cash_floor_fraction: float = Field(gt=0.0, lt=1.0)
+    cash_floor_fraction: float = Field(ge=0.0, lt=1.0)
     sizing_cost_buffer: float = Field(ge=0.0, le=0.5)
     hedge_fraction: float = Field(ge=0.0, lt=1.0)
     hedge: HedgeConfig
-    max_deployed: float = Field(gt=0.0, lt=1.0)
+    max_deployed: float = Field(gt=0.0, le=1.0)
     max_correlated_positions: int = Field(ge=1)
     correlation_lookback_days: int
     correlation_threshold: float

@@ -1,6 +1,28 @@
 # Backtest environment overlay — merged on top of base.yaml.
+#
+# RESEARCH PROFILE: risk limits are DISABLED here by explicit decision
+# (owner instruction, 2026-08-20) so architecture search is unconstrained.
+# paper.yaml and live.yaml DO NOT inherit this block — deployment profiles
+# keep the full safeguard set, which is the "re-add before live" plan made
+# structural instead of remembered.
+#
+# What this does NOT touch: costs, OOS splits, lookahead guards, controls,
+# N/concentration checks. Those are the measuring instrument, not safeguards.
 environment: backtest
 
 execution:
   commissions:
-    active_profile: "alpaca"
+    # AUDIT MEDIUM: alpaca profile = $0.00/contract, so every "real-cost" run
+    # charged zero option commissions. Schwab profile ($0.65/contract/side) is
+    # the conservative default consistent with the fill-frontier analysis.
+    active_profile: "schwab"
+
+risk:
+  cash_floor_fraction: 0.0        # no reserve requirement
+  max_deployed: 1.0               # full deployment allowed
+  sizing_cost_buffer: 0.0         # no sizing haircut
+  hedge_fraction: 0.0             # no forced hedge sleeve
+  max_correlated_positions: 999   # correlation cap off
+  correlation_threshold: 0.9999
+  daily_loss_halt: -0.99          # breakers effectively off (schema needs <0)
+  weekly_loss_halt: -0.99

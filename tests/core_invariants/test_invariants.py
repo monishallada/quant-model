@@ -70,9 +70,14 @@ class TestCashFloorNeverBreached:
     @pytest.mark.parametrize("seed", range(25))
     def test_randomized_order_stream_respects_cash_floor(self, seed: int) -> None:
         rng = random.Random(seed)
+        # Explicit floor: the test pins the MECHANISM (floor never breached),
+        # not whatever policy the research profile currently sets (which may
+        # legitimately be 0.0 during unconstrained search).
         cfg = load_config("backtest")
-        rm = RiskManager(cfg.risk)
-        floor_fraction = cfg.risk.cash_floor_fraction
+        rm_cfg = cfg.risk.model_copy(update={"cash_floor_fraction": 0.40,
+                                             "max_deployed": 0.95})
+        rm = RiskManager(rm_cfg)
+        floor_fraction = rm_cfg.cash_floor_fraction
 
         equity = 100_000.0
         cash = equity

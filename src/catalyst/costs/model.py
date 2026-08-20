@@ -68,6 +68,9 @@ class CostModel(ABC):
         lands on the *good* side of mid means a sign error somewhere.
         """
         mid = contract.mid
+        if price != price or mid != mid:
+            raise BetterThanNBBOError("NaN reached the fill path — upstream "
+                                      "quote sanitation failed")
         tol = 1e-9
         if side is Side.BUY and price < mid - tol:
             raise BetterThanNBBOError(

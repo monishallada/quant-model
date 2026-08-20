@@ -46,7 +46,7 @@ from catalyst.core.types import (
     Side,
     TradeRecord,
 )
-from catalyst.core.tradingcal import sessions_in_range
+from catalyst.core.tradingcal import session_close_time, sessions_in_range
 from catalyst.risk.manager import RiskManager
 
 logger = logging.getLogger(__name__)
@@ -80,6 +80,33 @@ class IntradayResult:
     equity: pd.Series                      # one mark per session close
     trades: list[TradeRecord]
     diagnostics: dict
+
+
+class _GuardedData:
+    """The lookahead wall for the raw data handle.
+
+    AUDIT MEDIUM: ctx.data was the raw DataSource — at a 10:00 decision a
+    strategy could request the SAME session's 15:45 chain (or next week's).
+    Chains are now restricted to strictly-prior sessions; listing expirations
+    is timeless metadata and passes through.
+    """
+
+    def __init__(self, data, session):
+        self._data, self._session = data, session
+
+    def list_expirations(self, symbol):
+        return self._data.list_expirations(symbol)
+
+    def get_chain(self, symbol, when, **kw):
+        if when.date() >= self._session:
+            raise LookaheadError(
+                f"strategy requested chain as-of {when} during session "
+                f"{self._session} — only strictly-prior sessions are visible")
+        return self._data.get_chain(symbol, when, **kw)
+
+
+class LookaheadError(RuntimeError):
+    """A strategy tried to read data from the present or future."""
 
 
 class IntradayBacktester:
@@ -126,9 +153,17 @@ class IntradayBacktester:
         universe: set[str] = set()
         for s in strategies:
             universe.update(s.session_universe(session))
-        day_bars = {sym: self._bars.get_day(sym, session) for sym in universe}
+        # AUDIT MEDIUM: set iteration order is per-process random — a strategy
+        # scanning ctx.bars and taking the first qualifying symbol produced
+        # different trades for identical inputs. Sorted = deterministic.
+        day_bars = {sym: self._bars.get_day(sym, session) for sym in sorted(universe)}
+        missing = [k for k, v in day_bars.items() if v is None or v.empty]
+        if missing:
+            # AUDIT HIGH: silence here means an invisibly mutilated dataset.
+            diag["missing_bar_days"] = diag.get("missing_bar_days", 0) + len(missing)
         day_bars = {k: v for k, v in day_bars.items() if v is not None and not v.empty}
         if not day_bars:
+            diag["skipped_sessions_no_bars"] = diag.get("skipped_sessions_no_bars", 0) + 1
             return
 
         option_frames: dict[OptionKey, pd.DataFrame] = {}
@@ -136,8 +171,17 @@ class IntradayBacktester:
         session_open_equity = broker.get_account().equity
         breaker_hit = False
 
+        # AUDIT HIGH: honor early closes (13:00 half days). Everything —
+        # the loop end, the flatten, and quote visibility — clamps to the
+        # session's REAL close; otherwise the engine trades forward-filled
+        # phantom quotes for up to 3 hours on ~4 sessions/year.
+        real_close = session_close_time(session)
+        end_ts = datetime.combine(session, min(SESSION_CLOSE.replace(), real_close))
+        flatten_at = min(
+            datetime.combine(session, p.eod_flatten),
+            end_ts - timedelta(minutes=2),
+        )
         start_ts = datetime.combine(session, SESSION_OPEN) + timedelta(minutes=1)
-        end_ts = datetime.combine(session, SESSION_CLOSE)
         ts = start_ts
         while ts <= end_ts:
             # -- market state at ts ----------------------------------------
@@ -156,13 +200,21 @@ class IntradayBacktester:
                 logger.warning("intraday breaker: %.1f%% session drawdown at %s",
                                100 * (equity_now / session_open_equity - 1), ts)
 
+            # -- mandatory flatten happens IN the loop at its true time ------
+            # (AUDIT LOW: it previously executed after the loop against the
+            # 16:00 market state while stamped 15:58 — two minutes of
+            # post-"flatten" price action leaked into the fill.)
+            if ts >= flatten_at:
+                self._flatten_all(broker, open_state, trades, ts, diag,
+                                  reason="eod_flatten")
+
             # -- exits BEFORE entries --------------------------------------
             self._process_exits(broker, open_state, trades, ts, diag)
 
             # -- entries ---------------------------------------------------
-            if ts.time() < p.eod_flatten:
+            if ts < flatten_at:
                 ctx = IntradayContext(session=session, now=ts, bars=visible,
-                                      data=self._data,
+                                      data=_GuardedData(self._data, session),
                                       option_quote=self._make_quote_fn(
                                           option_frames, session, ts, diag))
                 for strat in strategies:
@@ -180,8 +232,7 @@ class IntradayBacktester:
             ts += timedelta(minutes=p.decision_every_min)
 
         # -- mandatory flatten ---------------------------------------------
-        self._flatten_all(broker, open_state, trades,
-                          datetime.combine(session, p.eod_flatten), diag,
+        self._flatten_all(broker, open_state, trades, flatten_at, diag,
                           reason="eod_flatten")
 
     # ------------------------------------------------------------------
@@ -197,6 +248,9 @@ class IntradayBacktester:
         def quote(key):
             if key not in option_frames:
                 frame = self._oq.contract_day(key, session, SESSION_OPEN, SESSION_CLOSE)
+                if frame is not None and not frame.empty:
+                    close_dt = datetime.combine(session, session_close_time(session))
+                    frame = frame[frame.index <= close_dt]
                 option_frames[key] = frame if frame is not None else pd.DataFrame()
                 diag["quote_fetches"] = diag.get("quote_fetches", 0) + 1
             frame = option_frames[key]
@@ -247,7 +301,10 @@ class IntradayBacktester:
                 diag["stale_mark_minutes"] += 1
                 continue
             bid, ask = float(rows["bid"].iloc[-1]), float(rows["ask"].iloc[-1])
-            if ask <= 0:
+            # AUDIT MEDIUM: NaN defeats every guard (all comparisons False) —
+            # a NaN quote "fills", cash goes NaN, and no counter increments.
+            if bid != bid or ask != ask or ask <= 0:
+                diag["nan_quotes_dropped"] = diag.get("nan_quotes_dropped", 0) + 1
                 continue
             by_underlying.setdefault(key.underlying, []).append(
                 OptionContract(key=key, bid=max(bid, 0.0), ask=ask))
@@ -265,6 +322,9 @@ class IntradayBacktester:
             if isinstance(leg.key, OptionKey) and leg.key not in option_frames:
                 frame = self._oq.contract_day(leg.key, ts.date(),
                                               SESSION_OPEN, SESSION_CLOSE)
+                if frame is not None and not frame.empty:
+                    close_dt = datetime.combine(ts.date(), session_close_time(ts.date()))
+                    frame = frame[frame.index <= close_dt]
                 option_frames[leg.key] = frame if frame is not None else pd.DataFrame()
 
         chains = self._option_chains_at(option_frames, ts, diag)
@@ -316,6 +376,7 @@ class IntradayBacktester:
                   and pos.current_value / pos.entry_price - 1.0 <= rules.stop_loss_pct):
                 reason = "stop_loss"
             elif (rules.use_stops and rules.stop_loss_pct is not None
+                  and abs(rules.stop_loss_pct) > 1.0
                   and pos.entry_price < 0
                   and pos.current_value <= pos.entry_price * abs(rules.stop_loss_pct)):
                 # CREDIT structures: entry_price is the credit received
@@ -330,8 +391,21 @@ class IntradayBacktester:
                       <= -abs(rules.trail_stop_pct)):
                 reason = "trail_stop"
             if reason:
-                self._close(broker, pos, st, trades, ts, diag, reason)
-                open_state.pop(pos.position_id, None)
+                # AUDIT HIGH: pop state ONLY on a filled close. Popping on a
+                # rejected close created a zombie — the exit never retried,
+                # the position rode to the flatten, and the dedup (which reads
+                # open_state) let a SECOND concurrent position open: doubled
+                # exposure the risk gate never approved.
+                if self._close(broker, pos, st, trades, ts, diag, reason):
+                    open_state.pop(pos.position_id, None)
+
+    def _entry_commission_for(self, legs, qty: int) -> float:
+        """Entry-side commission from CAPTURED qty — never from pos.qty, which
+        the broker zeroes on a full close."""
+        from catalyst.core.types import EquityKey
+        per = self._cfg.execution.commissions.per_contract
+        return sum(per * leg.qty * qty for leg in legs
+                   if not isinstance(leg.key, EquityKey))
 
     def _flatten_all(self, broker, open_state, trades, ts, diag, reason) -> None:
         for pos in list(broker.get_positions()):
@@ -339,15 +413,20 @@ class IntradayBacktester:
                 strategy=pos.engine_tag, symbol=pos.underlying,
                 entry_ts=pos.entry_time, position_id=pos.position_id)
             self._close(broker, pos, st, trades, ts, diag, reason, force=True)
-            open_state.pop(pos.position_id, None)
+            open_state.pop(pos.position_id, None)   # force path always settles
             diag["forced_flattens"] += 1
 
     def _close(self, broker, pos: Position, st: _OpenState, trades, ts, diag,
-               reason: str, force: bool = False) -> None:
+               reason: str, force: bool = False) -> bool:
+        """Returns True when the position actually left the book."""
         # Capture BEFORE the close: the broker decrements pos.qty to zero on a
         # full close, so P&L computed afterwards would silently read as $0 —
         # a fabricated break-even on every single trade.
         qty, entry_price, multiplier = pos.qty, pos.entry_price, pos.multiplier
+        # VERIFIER CATCH: _entry_commission(pos) after place_order read
+        # pos.qty == 0 (the broker zeroes it on a full close) — the entry-side
+        # commission was always $0 and records missed it by exactly that much.
+        entry_comm = self._entry_commission_for(pos.legs, qty)
         legs = [OrderLeg(key=leg.key,
                          side=Side.SELL if leg.side is Side.BUY else Side.BUY,
                          qty=leg.qty * qty) for leg in pos.legs]
@@ -359,14 +438,25 @@ class IntradayBacktester:
             # Missing exit quote on a mandatory flatten: last-good-mid x
             # haircut, ALWAYS flagged. Silence here is how backtests lie.
             diag["synthetic_fills"] += 1
-            value = pos.current_value * self._p.synthetic_haircut
+            # AUDIT LOW->fixed: the haircut must be ADVERSE for BOTH signs. A
+            # credit position's mark is negative; multiplying by 0.9 SHRANK the
+            # liability — a 10% gift on exactly the fills that are already
+            # fabricated. Long: receive less. Short: pay more.
+            h = self._p.synthetic_haircut
+            value = pos.current_value * (h if pos.current_value >= 0 else (2.0 - h))
             broker.force_close(pos.position_id, value)
             result_price = value
         elif result.status is not OrderStatus.FILLED:
-            return                                  # try again next minute
+            diag["exit_retries"] = diag.get("exit_retries", 0) + 1
+            return False                            # try again next minute
         else:
-            result_price = result.avg_fill_price or pos.current_value
-        pnl = (result_price - entry_price) * qty * multiplier
+            result_price = (result.avg_fill_price
+                            if result.avg_fill_price is not None
+                            else pos.current_value)
+        # AUDIT MEDIUM: the LEDGER charged commissions on both sides but the
+        # TradeRecord ignored them — records must reconcile with cash.
+        close_comm = getattr(result, "commission", 0.0) or 0.0
+        pnl = (result_price - entry_price) * qty * multiplier - close_comm - entry_comm
         trades.append(TradeRecord(
             position_id=pos.position_id, engine=st.strategy,
             catalyst_ref=str(st.proposal_rationale.get("ref", st.symbol)),
@@ -374,3 +464,4 @@ class IntradayBacktester:
             entry_time=st.entry_ts, exit_time=ts,
             entry_price=entry_price, exit_price=result_price,
             qty=qty, pnl=pnl, exit_reason=reason, max_qty=qty))
+        return True

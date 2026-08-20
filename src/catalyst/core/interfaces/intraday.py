@@ -65,9 +65,16 @@ class IntradayContext:
             return None
         from datetime import time as dtime, timedelta
 
-        prior = self.session - timedelta(days=1)
-        while prior.weekday() >= 5:
-            prior -= timedelta(days=1)
+        # Previous SESSION, not previous weekday: the weekday loop was blind
+        # to holidays (audit LOW) and would request a chain for e.g. Good
+        # Friday and silently return None.
+        try:
+            from catalyst.core.tradingcal import previous_trading_day
+            prior = previous_trading_day(self.session)
+        except Exception:                               # noqa: BLE001
+            prior = self.session - timedelta(days=1)
+            while prior.weekday() >= 5:
+                prior -= timedelta(days=1)
         try:
             return self.data.get_chain(symbol, datetime.combine(prior, dtime(15, 45)),
                                        expiries=expiries, include_liquidity=False)

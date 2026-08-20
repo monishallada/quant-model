@@ -29,10 +29,19 @@ from catalyst.risk.manager import RiskManager
 # raising the cash floor to 50% for a variance strategy) reads as a broken risk
 # engine. Fix the limits here so the assertions stay meaningful.
 _LOADED = load_config("backtest")
+# These tests pin risk MECHANISMS (sizing math, floors, breakers, correlation
+# caps). The backtest profile is now a deliberately unconstrained research
+# profile, so every mechanism-relevant limit is set EXPLICITLY here — the
+# tests must keep their teeth regardless of what policy any profile sets.
 CFG = _LOADED.model_copy(update={
     "risk": _LOADED.risk.model_copy(update={
         "cash_floor_fraction": 0.40,
         "max_deployed": 0.25,
+        "sizing_cost_buffer": 0.05,
+        "daily_loss_halt": -0.08,
+        "weekly_loss_halt": -0.15,
+        "max_correlated_positions": 3,
+        "correlation_threshold": 0.7,
     })
 })
 TODAY = datetime(2024, 6, 3, 15, 45)

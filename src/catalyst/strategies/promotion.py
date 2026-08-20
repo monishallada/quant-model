@@ -93,7 +93,7 @@ def record_backtest(
 ) -> PromotionRecord:
     """Called by the pipeline. Grants `validated` ONLY on a passing verdict."""
     rec = PromotionRecord.load(name)
-    passed = verdict.startswith("CANDIDATE")
+    passed = verdict.startswith("CANDIDATE") and "test segment missing" not in verdict
     rec.validated = passed
     rec.validated_on = datetime.now(UTC).isoformat() if passed else None
     rec.validated_verdict = verdict

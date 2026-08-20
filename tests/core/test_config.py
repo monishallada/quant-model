@@ -10,7 +10,7 @@ def test_loads_backtest_environment() -> None:
     cfg = load_config("backtest")
     assert cfg.environment == "backtest"
     assert cfg.account.starting_capital == 100_000.0
-    assert 0.0 < cfg.risk.cash_floor_fraction < 1.0
+    assert 0.0 <= cfg.risk.cash_floor_fraction < 1.0
 
 
 def test_risk_config_is_immutable() -> None:
@@ -35,7 +35,14 @@ def test_overrides_still_validated() -> None:
 
 
 def test_commission_profile_switch() -> None:
-    alpaca = load_config("backtest")
-    schwab = load_config("backtest", overrides={"execution.commissions.active_profile": "schwab"})
-    assert alpaca.execution.commissions.per_contract == 0.0
-    assert schwab.execution.commissions.per_contract == 0.65
+    """The profile MECHANISM: each profile selects its own rate. Which profile
+    an environment uses is policy (backtest now pins schwab for conservatism —
+    audit 2026-08-20 found 'real-cost' runs charging $0 on alpaca)."""
+    from catalyst.core.config import CommissionsConfig
+
+    alp = CommissionsConfig(alpaca_per_contract=0.0, schwab_per_contract_per_leg=0.65,
+                            active_profile="alpaca")
+    sch = CommissionsConfig(alpaca_per_contract=0.0, schwab_per_contract_per_leg=0.65,
+                            active_profile="schwab")
+    assert alp.per_contract == 0.0
+    assert sch.per_contract == 0.65

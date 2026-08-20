@@ -26,6 +26,14 @@ from catalyst.exits.manager import evaluate_exits
 from tests.conftest import build_chain
 
 CFG = load_config("backtest")
+# Mechanism tests: pin the risk policy explicitly (the backtest profile is an
+# unconstrained research profile; without the sizing buffer these assertions
+# on realized-spend-within-budget lose the very mechanism they pin).
+CFG = CFG.model_copy(update={"risk": CFG.risk.model_copy(update={
+    "cash_floor_fraction": 0.40, "max_deployed": 0.25,
+    "sizing_cost_buffer": 0.05, "daily_loss_halt": -0.08,
+    "weekly_loss_halt": -0.15, "max_correlated_positions": 3,
+    "correlation_threshold": 0.7})})
 REPORT = datetime(2024, 5, 1, 16, 0)      # AMC -> reaction 2024-05-02
 REACTION = date(2024, 5, 2)
 ENTRY = date(2024, 5, 6)                  # 2 sessions after reaction

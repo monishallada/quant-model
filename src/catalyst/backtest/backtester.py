@@ -67,6 +67,7 @@ class _OpenTradeState:
     max_qty: int
     commissions: float = 0.0
     exit_cash_weighted: float = 0.0  # Σ credit_per_unit × qty_closed
+    multiplier: float = 100.0        # instrument dollars-per-point (audit LOW)
     qty_closed: int = 0
     exit_reasons: list[str] = field(default_factory=list)
     last_exit_time: datetime | None = None
@@ -178,6 +179,19 @@ class Backtester:
             if -self._lookback_days <= delta_days <= _CATALYST_LOOKAHEAD_DAYS:
                 out.append(c)
         return out
+
+    @staticmethod
+    def _pit_history(history: dict, session) -> dict:
+        """Point-in-time view: bars strictly BEFORE the session.
+
+        AUDIT HIGH: the full backtest-window frames were handed to every
+        StrategyContext — ctx.history[sym].iloc[-1] was the END of the
+        backtest, a straight lookahead for any strategy reading history
+        (the signal path was sliced; the context path was not).
+        """
+        import pandas as _pd
+        cutoff = _pd.Timestamp(session)
+        return {k: v[v.index < cutoff] for k, v in history.items()}
 
     def _pull_chains(
         self,
@@ -319,16 +333,25 @@ class Backtester:
     ) -> None:
         """Fold positions the broker settled at expiry into trade records."""
         live_ids = {p.position_id for p in broker.get_positions()}
+        # AUDIT MEDIUM: a deep-ITM settle that paid $6,000 into cash was
+        # recorded as pnl=-$1.30 (exit approximated as entry). The broker now
+        # keeps settlement telemetry; the record reconciles against it.
+        settled = {pid: (value, pnl) for pid, value, pnl in
+                   getattr(broker, "settlements", [])}
         for pid in list(open_state):
             if pid in live_ids:
                 continue
             state = open_state.pop(pid)
-            # Whatever qty never showed up in close fills settled at expiry;
-            # its cash effect is in broker equity. Approximate the per-unit
-            # settle value as entry (flat) unless closes tell us otherwise.
             state.exit_reasons.append("expired_settled")
             state.last_exit_time = at
-            trades.append(self._to_record(pid, state, settled_remainder=True))
+            if pid in settled:
+                value, _pnl = settled[pid]
+                remaining = state.max_qty - state.qty_closed
+                state.exit_cash_weighted += value * remaining
+                state.qty_closed += remaining
+                trades.append(self._to_record(pid, state))
+            else:
+                trades.append(self._to_record(pid, state, settled_remainder=True))
 
     def _finalize_open(
         self,
@@ -357,9 +380,10 @@ class Backtester:
         else:
             exit_price = state.entry_price  # settled remainder approximation
         closed_qty = state.qty_closed if state.qty_closed else state.max_qty
+        mult = getattr(state, "multiplier", 100.0)
         pnl = (
-            state.exit_cash_weighted * 100.0
-            - state.entry_price * closed_qty * 100.0
+            state.exit_cash_weighted * mult
+            - state.entry_price * closed_qty * mult
             - state.commissions
         ) if state.qty_closed else -state.commissions
         return TradeRecord(
@@ -435,7 +459,8 @@ class Backtester:
                 if not self._passes_screener(catalyst, chain, at):
                     continue
                 ctx = StrategyContext(as_of=at, data=self._data, signal=signal,
-                                      history=history, chains={sym: chain})
+                                      history=self._pit_history(history, session),
+                                      chains={sym: chain})
                 opp = Opportunity(session=session, symbols=(sym,), catalyst=catalyst)
                 for strat in self._strategies:
                     if (strat.name, catalyst.ref) in already:
@@ -467,14 +492,17 @@ class Backtester:
         for strat in self._strategies:
             if strat.cadence is Cadence.CATALYST:
                 continue
-            probe = StrategyContext(as_of=at, data=self._data, history=history, chains=chains)
+            probe = StrategyContext(as_of=at, data=self._data,
+                                    history=self._pit_history(history, session),
+                                    chains=chains)
             for opp in strat.opportunities(session, probe):
                 sym = opp.symbol
                 if sym not in chains:
                     continue
                 signal = self._signal_for(sym, history, session, chains[sym])
                 ctx = StrategyContext(as_of=at, data=self._data, signal=signal,
-                                      history=history, chains=chains)
+                                      history=self._pit_history(history, session),
+                                      chains=chains)
                 proposal = strat.plan(opp, ctx)
                 if proposal is None:
                     continue
@@ -549,6 +577,7 @@ class Backtester:
             catalyst_ref=proposal.catalyst_ref,
             underlying=proposal.legs[0].key.underlying,
             direction=proposal.direction,
+            multiplier=proposal.multiplier,
             entry_time=at,
             entry_price=result.avg_fill_price or proposal.unit_cost,
             max_qty=result.filled_qty,
