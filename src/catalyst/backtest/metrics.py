@@ -47,17 +47,26 @@ def max_drawdown(equity: pd.Series) -> float:
     return float(dd.min()) if len(dd) else 0.0
 
 
-def sharpe(daily_returns: pd.Series) -> float:
+def sharpe(daily_returns: pd.Series, rf_annual: float = 0.0) -> float:
+    """Annualized Sharpe. ``rf_annual`` defaults to 0 — the historical
+    convention of every report in this repo; pass the cash rate to get the
+    excess-return figure (audit D-189: the assumption is now a parameter,
+    not an invisible choice)."""
     if len(daily_returns) < 2 or daily_returns.std(ddof=1) == 0:
         return 0.0
-    return float(daily_returns.mean() / daily_returns.std(ddof=1) * math.sqrt(TRADING_DAYS_PER_YEAR))
+    excess = daily_returns - rf_annual / TRADING_DAYS_PER_YEAR
+    return float(excess.mean() / daily_returns.std(ddof=1) * math.sqrt(TRADING_DAYS_PER_YEAR))
 
 
 def sortino(daily_returns: pd.Series) -> float:
-    downside = daily_returns[daily_returns < 0]
-    if len(daily_returns) < 2 or len(downside) == 0:
+    """Annualized Sortino with the STANDARD downside deviation:
+    sqrt(sum(min(r,0)^2) / N) over ALL N observations. Dividing by the count
+    of negative days (the old code) overstated the ratio ~sqrt(N/N_neg)
+    (audit D-094: ~1.6x at a 60% win rate)."""
+    if len(daily_returns) < 2:
         return 0.0
-    downside_std = float(np.sqrt(np.mean(np.square(downside))))
+    downside_sq = np.square(np.minimum(daily_returns.to_numpy(dtype=float), 0.0))
+    downside_std = float(np.sqrt(downside_sq.mean()))
     if downside_std == 0:
         return 0.0
     return float(daily_returns.mean() / downside_std * math.sqrt(TRADING_DAYS_PER_YEAR))
@@ -78,7 +87,12 @@ def calmar(equity: pd.Series) -> float:
     years = _years_spanned(equity)
     if years <= 0 or equity.iloc[0] <= 0:
         return 0.0
-    cagr = (equity.iloc[-1] / equity.iloc[0]) ** (1.0 / years) - 1.0
+    if equity.iloc[-1] <= 0:
+        # a wiped-out account: fractional power of a negative base is NaN
+        # under numpy floats (audit D-095); report the worst legal CAGR
+        cagr = -1.0
+    else:
+        cagr = (equity.iloc[-1] / equity.iloc[0]) ** (1.0 / years) - 1.0
     mdd = abs(max_drawdown(equity))
     if mdd == 0:
         return 0.0
@@ -93,8 +107,14 @@ def avg_monthly_return(equity: pd.Series) -> float:
     return over the period. Reported ahead of every other statistic because it
     is the figure decisions are actually made on.
     """
-    if len(equity) < 2 or equity.iloc[0] <= 0 or equity.iloc[-1] <= 0:
+    if len(equity) < 2 or equity.iloc[0] <= 0:
         return 0.0
+    if equity.iloc[-1] <= 0:
+        # total loss: geometric monthly cannot represent <= -100%; report
+        # -1.0 (wiped out) instead of the old 0.0, which read as FLAT for a
+        # bankrupt account (audit D-096 — the single most dangerous default
+        # in the metrics layer)
+        return -1.0
     # Elapsed time comes from the DATES when we have them, never from the row
     # count. A curve marked only at exits has ~16 rows across a year; reading
     # that as 16 trading days turns a +10% year into "+12.8% per month". Row
@@ -121,7 +141,11 @@ def headline(equity: pd.Series) -> dict[str, float]:
     """The standard header block every strategy report leads with."""
     monthly = monthly_return_series(equity)
     years = _years_spanned(equity)
-    cagr = ((equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1.0) if years > 0 and len(equity) > 1 else 0.0
+    if years > 0 and len(equity) > 1 and equity.iloc[0] > 0:
+        cagr = (((equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1.0)
+                if equity.iloc[-1] > 0 else -1.0)   # wiped out (audit D-097)
+    else:
+        cagr = 0.0
     return {
         "avg_monthly_return": avg_monthly_return(equity),
         "median_monthly_return": float(monthly.median()) if len(monthly) else 0.0,
@@ -176,7 +200,9 @@ def trade_stats(trades: list[TradeRecord]) -> dict[str, float]:
         return {"win_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.0, "win_loss_ratio": 0.0}
     pnls = [t.pnl for t in trades]
     wins = [p for p in pnls if p > 0]
-    losses = [p for p in pnls if p <= 0]
+    # scratches (exactly 0) are neither wins nor losses; counting them as
+    # losses diluted avg_loss toward zero and inflated W/L (audit D-190)
+    losses = [p for p in pnls if p < 0]
     avg_win = float(np.mean(wins)) if wins else 0.0
     avg_loss = float(np.mean(losses)) if losses else 0.0
     return {

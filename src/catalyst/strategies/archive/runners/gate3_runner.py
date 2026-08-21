@@ -1,4 +1,11 @@
-"""Gate 3 runner: FULL integrated backtest — all enabled engines + the
+"""
+[ARCHIVE METHODOLOGY NOTE — audit v15, D-069/D-157] The 'dial' mode
+selected aggressiveness parameters on FULL-RANGE (in-sample) runs, and sweep
+mode printed test-segment columns beside in-sample selections. Numbers from
+these modes are IN-SAMPLE parameter exploration, not out-of-sample evidence;
+the archived campaign conclusions that relied on the pipeline verdicts are
+unaffected. Kept byte-identical for reproducibility.
+Gate 3 runner: FULL integrated backtest — all enabled engines + the
 authoritative RiskManager + hedge sleeve + mechanical exits — over the full
 history, with the parameter sweep and the aggressiveness dial.
 

@@ -27,8 +27,20 @@ def iter_combinations(cfg: SweepConfig, seed: int = 11) -> Iterator[dict[str, An
             yield dict(zip(names, combo))
     else:
         rng = random.Random(seed)
-        for _ in range(cfg.random_samples):
-            yield {n: rng.choice(vals) for n, vals in zip(names, value_lists)}
+        # dedup across draws (audit D-196): duplicate combinations re-ran
+        # identical backtests and appeared as distinct rows in the table
+        seen: set[tuple] = set()
+        attempts = 0
+        emitted = 0
+        while emitted < cfg.random_samples and attempts < cfg.random_samples * 20:
+            attempts += 1
+            combo = {n: rng.choice(vals) for n, vals in zip(names, value_lists)}
+            key = tuple(sorted((k, str(v)) for k, v in combo.items()))
+            if key in seen:
+                continue
+            seen.add(key)
+            emitted += 1
+            yield combo
 
 
 def run_sweep(

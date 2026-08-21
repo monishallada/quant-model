@@ -15,12 +15,14 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import date
+import logging
 from pathlib import Path
 from typing import Callable
 
 from catalyst.core.interfaces import Strategy
 
-ARCHIVE_ROOT = Path("src/catalyst/strategies/archive")
+# anchored to the package, not the process cwd (audit D-163)
+ARCHIVE_ROOT = Path(__file__).resolve().parent / "archive"
 RESULTS_ROOT = Path("results")
 META_FILENAME = "strategy.json"
 
@@ -79,7 +81,14 @@ def registry() -> dict[str, StrategyMeta]:
         rec = PromotionRecord.load(name)
         merged = StrategyMeta(**{**asdict(meta),
                                  "validated": rec.validated,
-                                 "paper_tested": rec.paper_tested})
+                                 "paper_tested": rec.paper_tested,
+                                 # verdict/avg were stale strategy.json values
+                                 # while the ledger moved on (audit D-153)
+                                 "verdict": rec.validated_verdict or meta.verdict,
+                                 "avg_monthly_return": (
+                                     rec.validated_avg_monthly
+                                     if rec.validated_avg_monthly is not None
+                                     else meta.avg_monthly_return)})
         out[name] = merged
     return out
 
@@ -87,9 +96,20 @@ def registry() -> dict[str, StrategyMeta]:
 def load_strategy(name: str, cfg) -> Strategy:
     _ensure_loaded()
     if name not in _BUILDERS:
+        # Archived strategies are discovered from disk as METADATA only — their
+        # modules are not imported at startup, so no builder is registered yet.
+        # Import on demand so an archived campaign stays re-runnable, which is
+        # the repo's standing promise about archived code.
+        meta = _META.get(name)
+        if meta is not None and meta.module:
+            import importlib
+            importlib.import_module(meta.module)
+    if name not in _BUILDERS:
         raise KeyError(f"unknown strategy '{name}'; known: {sorted(_BUILDERS)}")
     return _BUILDERS[name](cfg)
 
+
+logger = logging.getLogger(__name__)
 
 _loaded = False
 
@@ -122,6 +142,10 @@ def _ensure_loaded() -> None:
     for meta_path in ARCHIVE_ROOT.glob(f"*/{META_FILENAME}"):
         try:
             m = StrategyMeta.load(meta_path)
-        except Exception:                        # noqa: BLE001
+        except Exception as e:                   # noqa: BLE001
+            # an unreadable strategy.json silently VANISHED the strategy from
+            # the registry (audit D-228) — surface it
+            logger.error("unreadable archived strategy metadata %s: %s "
+                         "— strategy NOT registered", meta_path, e)
             continue
         _META.setdefault(m.name, m)

@@ -42,6 +42,10 @@ def previous_trading_day(d: date) -> date:
     """Last trading day strictly before ``d``."""
     days = _sessions()
     i = bisect.bisect_left(days, d)
+    if i == 0:
+        # days[-1] would silently WRAP to the calendar's last session
+        # (audit D-122: previous_trading_day(2010-01-04) returned 2026-xx)
+        raise ValueError(f"{d} precedes the trading calendar's first session")
     return days[i - 1]
 
 
@@ -87,6 +91,8 @@ def session_close_time(day: date):
     nyse = mcal.get_calendar("NYSE")
     sched = nyse.schedule(start_date=day, end_date=day)
     if sched.empty:
-        return _time(16, 0)
+        # a holiday/weekend has NO close; a plausible 16:00 sent callers
+        # confidently marking a non-session (audit D-207)
+        raise ValueError(f"{day} is not a trading session; it has no close time")
     close_et = sched["market_close"].iloc[0].tz_convert("America/New_York")
     return close_et.time()

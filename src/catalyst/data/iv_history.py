@@ -53,12 +53,14 @@ class IVRankProvider:
     # ------------------------------------------------------------------
 
     def _monthly_expirations(self, symbol: str, start: date, end: date) -> list[date]:
-        df = self._cache.get("expirations", symbol)
+        # year-scoped like ThetaDataHistorical (audit D-136): listings grow
+        key = f"{symbol}_{date.today():%Y}"
+        df = self._cache.get("expirations", key)
         if df is None:
             df = self._client.get_dataframe(
                 "/v3/option/list/expirations", {"symbol": symbol}
             )
-            self._cache.put("expirations", symbol, df)
+            self._cache.put("expirations", key, df)
         if df.empty:
             return []
         all_exp = sorted(pd.to_datetime(df["expiration"]).dt.date.unique())
@@ -95,7 +97,13 @@ class IVRankProvider:
         return df
 
     def atm_iv_series(self, symbol: str, start: date, end: date) -> pd.Series:
-        """Daily ~30-DTE ATM IV series for [start, end] (assembled once, cached)."""
+        """Daily ~30-DTE ATM IV series for [start, end] (assembled once, cached).
+
+        NOT constant-maturity (audit D-133): each day takes the monthly expiry
+        with DTE in [20, 45] closest to 30, so tenor saw-tooths across the
+        cycle. Ranks computed on it compare like-for-like (the same sawtooth),
+        but the LEVEL feeding IV/RV carries tenor noise of a few vol points.
+        """
         cache_key = f"{symbol}_{start:%Y%m%d}_{end:%Y%m%d}"
         cached = self._cache.get("iv_series", cache_key)
         if cached is not None:
@@ -118,13 +126,17 @@ class IVRankProvider:
                         logger.debug("IV prefetch failed: %s", exc)
 
         rows: dict[date, tuple[int, float]] = {}  # day -> (|dte-30|, iv)
+        complete = True
         for expiry in monthlies:
             try:
                 df = self._expiry_frame(symbol, expiry)
             except ThetaDataError as exc:
                 # One unfetchable month costs the IV series ~1 sample window;
-                # aborting a multi-hour warmup job costs everything.
+                # aborting a multi-hour warmup job costs everything. But the
+                # RESULT is partial and must never be cached as the truth
+                # (audit D-010: gate inputs froze on holes forever).
                 logger.warning("Skipping IV month %s %s: %s", symbol, expiry, exc)
+                complete = False
                 continue
             if df.empty:
                 continue
@@ -143,6 +155,15 @@ class IVRankProvider:
                     continue
                 strikes = day_rows["strike"].astype(float)
                 atm_strike = strikes.iloc[(strikes - spot).abs().argsort().iloc[0]]
+                # The fixed strike band can strand the nearest captured strike
+                # far from a moved spot; its IV is a different moneyness, not
+                # "ATM" (audit D-053). A hole beats a fabricated sample.
+                if abs(atm_strike - spot) / spot > 0.10:
+                    logger.warning("IV %s %s: nearest strike %.1f is %.0f%% from "
+                                   "spot %.2f — day dropped", symbol, day,
+                                   atm_strike, 100 * abs(atm_strike - spot) / spot,
+                                   spot)
+                    continue
                 atm = day_rows[day_rows["strike"].astype(float) == atm_strike]
                 iv = float(atm["implied_vol"].mean())
                 fit = abs(dte - _DTE_TARGET)
@@ -155,7 +176,11 @@ class IVRankProvider:
         out_df = pd.DataFrame(
             {"date": [d.isoformat() for d in series.index], "atm_iv": series.values}
         )
-        self._cache.put("iv_series", cache_key, out_df)
+        if complete:
+            self._cache.put("iv_series", cache_key, out_df)
+        else:
+            logger.warning("IV series for %s assembled from PARTIAL months — "
+                           "served fresh, NOT cached (audit D-010)", symbol)
         return series
 
     # ------------------------------------------------------------------
@@ -165,14 +190,38 @@ class IVRankProvider:
         warmup_start = start - timedelta(days=int(self._lookback * 1.6))
         self._series[symbol] = self.atm_iv_series(symbol, warmup_start, end)
 
-    def iv_rank(self, symbol: str, day: date) -> float | None:
-        """IV rank 0..100 for ``day``, or None without enough history."""
+    def _visible(self, symbol: str, day: date, include_day: bool) -> pd.Series:
+        """History visible to a decision made ON ``day``.
+
+        AUDIT (v14 verification): the series is EOD greeks, timestamped
+        ~15:59:5x. Every decision in this system is taken at the 15:45
+        snapshot, so the entry day's own value is ~15 minutes in the FUTURE.
+        Default is therefore strictly-before; a caller that genuinely acts
+        after the close must ask for ``include_day=True`` explicitly.
+        """
         series = self._series.get(symbol)
         if series is None:
             raise RuntimeError(f"IVRankProvider.prepare() not called for {symbol}")
-        upto = series[series.index <= day]
+        return series[series.index <= day] if include_day else series[series.index < day]
+
+    def iv_rank(self, symbol: str, day: date, *,
+                include_day: bool = False) -> float | None:
+        """IV rank 0..100 as of ``day``, or None without enough history."""
+        upto = self._visible(symbol, day, include_day)
         if len(upto) < self._lookback // 2:
             return None
         window = upto.tail(self._lookback)
         current = window.iloc[-1]
         return float((window < current).mean() * 100.0)
+
+    def atm_iv30(self, symbol: str, day: date, *,
+                 include_day: bool = False) -> float | None:
+        """The ~30-DTE ATM IV level as of ``day`` (last value before it).
+
+        The IV/RV gate needs a tenor-matched numerator: event-expiry IV is
+        mechanically inflated by the event and made that gate a no-op."""
+        upto = self._visible(symbol, day, include_day)
+        if not len(upto):
+            return None
+        v = float(upto.iloc[-1])
+        return v if v > 0 else None

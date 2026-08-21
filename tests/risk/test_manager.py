@@ -66,7 +66,12 @@ def proposal(
     key = OptionKey(underlying=symbol, expiry=date(2024, 6, 21), right=OptionRight.CALL, strike=533.0)
     return ProposedTrade(
         engine=engine, catalyst_ref="t:x", legs=[OrderLeg(key=key, side=Side.BUY, qty=1)],
-        unit_cost=unit_cost, unit_max_loss=unit_cost, direction=Direction.LONG,
+        # credit structures (negative cost) risk their width, not their
+        # premium — a negative max_loss would zero-size every credit and
+        # silently un-test the credit arm (audit D-168)
+        unit_cost=unit_cost,
+        unit_max_loss=unit_cost if unit_cost > 0 else abs(unit_cost) * 4.0,
+        direction=Direction.LONG,
         exit_rules=ExitRules(), per_trade_risk_fraction=risk_fraction,
     )
 
@@ -198,13 +203,21 @@ def test_property_cash_floor_never_breached_under_random_streams() -> None:
         cash = equity
         positions: list[Position] = []
         for step in range(60):
-            unit_cost = rng.uniform(0.3, 45.0)
+            # HALF the stream is CREDIT structures (negative cost): the old
+            # debit-only stream never exercised the floor against the
+            # cash-RAISING trades that threaten it most (audit D-168)
+            if rng.random() < 0.5:
+                unit_cost = rng.uniform(0.3, 45.0)
+            else:
+                unit_cost = -rng.uniform(0.3, 5.0)
             frac = rng.choice([0.02, 0.03, 0.05, 0.10])
             engine = rng.choice(["engine_a", "engine_b", "engine_c", "hedge"])
             p = proposal(unit_cost=unit_cost, risk_fraction=frac, engine=engine)
             d = rm.size_entry(p, account(equity=equity, cash=cash), positions)
             if d.units > 0:
-                cost = unit_cost * 100.0 * d.units
+                # credits RAISE cash but consume collateral == max loss
+                basis = unit_cost if unit_cost > 0 else p.unit_max_loss
+                cost = basis * 100.0 * d.units
                 cash -= cost
                 positions.append(open_position(cost, engine=engine))
                 # Invariant: the floor survives every approved entry.

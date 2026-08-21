@@ -16,7 +16,11 @@ from datetime import date
 
 from catalyst.core.types import OptionKey, OptionRight
 
-_COMPACT_RE = re.compile(r"^([A-Z.]{1,6})(\d{6})([CP])(\d{8})$")
+# OCC roots are alphanumeric AFTER corporate-action adjustments (AAPL1, SPXW2):
+# a digit is legal anywhere except the first character. Excluding digits made
+# every adjusted position unparseable, and broker reconciliation silently
+# dropped those rows (audit D-121).
+_COMPACT_RE = re.compile(r"^([A-Z.][A-Z0-9.]{0,5})(\d{6})([CP])(\d{8})$")
 
 
 def _strike_thousandths(strike: float) -> int:
@@ -26,15 +30,24 @@ def _strike_thousandths(strike: float) -> int:
 
 def to_osi(key: OptionKey, pad_root: bool = True) -> str:
     """Format as OSI. ``pad_root=True`` gives the Schwab 21-char form,
-    False the Alpaca/OCC compact form."""
+    False the Alpaca/OCC compact form.
+
+    Fails loudly on inputs OSI cannot represent (root > 6 chars, strike
+    >= $100,000): emitting a malformed symbol would send a live order for
+    the wrong instrument (audit D-206)."""
     root = key.underlying.upper()
+    if len(root) > 6:
+        raise ValueError(f"OSI root must be <= 6 chars: {root!r}")
+    thousandths = _strike_thousandths(key.strike)
+    if not (0 < thousandths <= 99_999_999):
+        raise ValueError(f"strike {key.strike} not representable in OSI 8 digits")
     if pad_root:
         root = f"{root:<6}"
     return (
         f"{root}"
         f"{key.expiry.strftime('%y%m%d')}"
         f"{key.right.value}"
-        f"{_strike_thousandths(key.strike):08d}"
+        f"{thousandths:08d}"
     )
 
 

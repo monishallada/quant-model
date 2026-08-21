@@ -29,7 +29,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-LEDGER_ROOT = Path("results")
+# Anchored to the repo root, not the process cwd: a run started from another
+# directory silently forked a second evidence trail (audit D-161).
+LEDGER_ROOT = Path(__file__).resolve().parents[3] / "results"
 STATUS_FILE = "status.json"
 
 
@@ -62,13 +64,24 @@ class PromotionRecord:
         try:
             return cls(**json.loads(p.read_text()))
         except Exception as e:                          # noqa: BLE001
-            logger.warning("unreadable promotion record %s: %s", p, e)
+            # Preserve the torn/corrupt evidence instead of letting the next
+            # save() overwrite it with a fresh record (audit D-162).
+            quarantine = p.with_suffix(f".corrupt-{datetime.now(UTC):%Y%m%dT%H%M%S}")
+            try:
+                p.rename(quarantine)
+                logger.error("unreadable promotion record %s: %s — preserved "
+                             "as %s", p, e, quarantine.name)
+            except OSError:
+                logger.error("unreadable promotion record %s: %s", p, e)
             return cls(name=name)
 
     def save(self) -> Path:
         p = self.path_for(self.name)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(asdict(self), indent=2, default=str))
+        # atomic: a crash mid-write must never tear the evidence file (D-162)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(asdict(self), indent=2, default=str))
+        tmp.replace(p)
         return p
 
     def _log(self, event: str, detail: str) -> None:
@@ -89,10 +102,20 @@ def code_hash(module_path: Path) -> str:
 
 
 def record_backtest(
-    name: str, verdict: str, avg_monthly: float | None, module_path: Path | None = None
+    name: str, verdict: str, avg_monthly: float | None,
+    module_path: Path | None = None, *, research: bool = False,
 ) -> PromotionRecord:
-    """Called by the pipeline. Grants `validated` ONLY on a passing verdict."""
+    """Called by the pipeline. Grants `validated` ONLY on a passing verdict.
+
+    ``research=True`` (any run with config overrides) records NOTHING: a
+    --set variant run must never overwrite the canonical evidence trail
+    (audit D-070 — observed live when a probe run clobbered the v14 verdict).
+    """
     rec = PromotionRecord.load(name)
+    if research:
+        logger.info("research run for %s (verdict %s) — promotion ledger "
+                    "NOT written", name, verdict)
+        return rec
     passed = verdict.startswith("CANDIDATE") and "test segment missing" not in verdict
     rec.validated = passed
     rec.validated_on = datetime.now(UTC).isoformat() if passed else None
@@ -111,15 +134,24 @@ def record_backtest(
 
 
 def record_paper_session(
-    name: str, account: str, orders_seen: int = 0
+    name: str, account: str, orders_seen: int = 0, round_trips: int = 0
 ) -> PromotionRecord:
-    """Called after a real paper session. Requires prior validation."""
+    """Called after a real paper session. Requires prior validation AND at
+    least one observed round trip (entry + exit) — connecting is not testing
+    (audit D-016)."""
     rec = PromotionRecord.load(name)
     if not rec.validated:
         rec._log("paper", "refused: not validated")
         rec.save()
         raise PermissionError(
             f"'{name}' ran in paper but is not validated — paper_tested not granted")
+    if round_trips < 1:
+        rec._log("paper", f"session on {account}: {orders_seen} orders, "
+                          f"{round_trips} round trips — paper_tested NOT granted")
+        rec.save()
+        raise PermissionError(
+            f"'{name}' paper session completed no round trip — paper_tested "
+            "requires at least one observed entry AND exit")
     rec.paper_tested = True
     rec.paper_tested_on = datetime.now(UTC).isoformat()
     rec.paper_account = account

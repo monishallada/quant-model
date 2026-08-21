@@ -480,3 +480,15 @@ observability:
   stale_data_alert_seconds: 300
   kill_switch_file: "KILL_SWITCH"        # main loop halts new entries if this file exists
   kill_switch_flatten: false             # if true, also flatten open positions on kill
+
+short_vrp:                               # v14 concentrated short-VRP (iron condors)
+  iv_rank_min: 0.80                      # trade only the richest premium
+  iv_rv_min: 1.3                         # implied / 30d realized
+  implied_vs_hist_min: 1.1               # implied move vs avg |move| last 8 earnings
+  short_delta: 0.16                      # ~1-sigma short strikes
+  max_dte: 9                             # first expiry >= event+1, capped
+  tp_credit_fraction: 0.50               # take the crush at half the credit
+  stop_credit_multiple: 2.0              # tested on AND off
+  use_stops: true                        # spec default; twin runs toggle via --set short_vrp.use_stops=false
+  per_trade_risk_fraction: 0.02          # of equity, on structural max loss
+  max_leg_spread_pct_of_mid: 0.08

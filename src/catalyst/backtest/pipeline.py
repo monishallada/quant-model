@@ -32,22 +32,10 @@ from catalyst.core.interfaces import DataSource, DirectionalSignal, Strategy
 from catalyst.core.types import BacktestResult, Catalyst
 from catalyst.reporting.comparison import EngineComparison, EngineView
 from catalyst.reporting.report import StrategyReport, build_segment
-from catalyst.risk.hedge import HedgeManager
 from catalyst.strategies.promotion import record_backtest
 from catalyst.risk.manager import RiskManager
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PipelineRun:
-    """Raw output of one (segment, cost-profile) execution."""
-
-    segment: str
-    cost_profile: str
-    result: BacktestResult
-    equity: pd.Series
-    trades: list = field(default_factory=list)
 
 
 class Pipeline:
@@ -60,7 +48,6 @@ class Pipeline:
         signal: DirectionalSignal,
         catalysts: list[Catalyst] | None = None,
         screener: object | None = None,
-        hedge: bool = False,
         engines: list[BacktestEngine] | None = None,
     ) -> None:
         self._cfg = cfg
@@ -68,7 +55,6 @@ class Pipeline:
         self._signal = signal
         self._catalysts = list(catalysts or [])
         self._screener = screener
-        self._hedge = hedge
         # Every available engine runs. The native one is the reference;
         # the rest exist to disagree with it when it is wrong.
         self._engines = engines if engines is not None else build_engines()
@@ -138,7 +124,15 @@ class Pipeline:
         for seg, s, e in segments:
             for zero in (False, True):
                 profile = "zero" if zero else "real"
+                # Gate counters accumulate on the strategy instance across the
+                # six runs, so per-run counts are the before/after difference.
+                gates_before = dict(getattr(strategy, "gates", {}) or {})
                 results = self._execute_all(strategy, s, e, zero_cost=zero, label=seg)
+                gates_after = dict(getattr(strategy, "gates", {}) or {})
+                if gates_after:
+                    report.extras[f"gates_{seg}_{profile}"] = {
+                        k: gates_after.get(k, 0) - gates_before.get(k, 0)
+                        for k in gates_after}
 
                 # The headline segment comes from the reference engine — the
                 # first in the cadence-selected family (native for daily,
@@ -151,6 +145,8 @@ class Pipeline:
                 if native is not None:
                     report.segments.append(
                         build_segment(seg, profile, native.equity, native.trades))
+                    report.ledgers[f"{seg}_{profile}"] = list(native.trades)
+                    report.equities[f"{seg}_{profile}"] = native.equity
 
                 report.comparisons.append(EngineComparison(
                     strategy=strategy.name, segment=seg, cost_profile=profile,
@@ -159,16 +155,28 @@ class Pipeline:
                             {r.engine: (len(r.trades) if r.ok else r.error)
                              for r in results})
 
+        # D-026: the "mandatory" matrix is now enforced — a report missing any
+        # of its six segments (engine error, empty result) says so in the
+        # verdict instead of silently omitting the diagnostic.
+        expected = {(seg, prof) for seg in ("full", "train", "test")
+                    for prof in ("real", "zero")}
+        produced = {(s_.segment, s_.cost_profile) for s_ in report.segments}
+        missing = expected - produced
+        if missing:
+            report.extras["segments_missing"] = sorted(
+                f"{a}/{b}" for a, b in missing)
+
         report.extras["cadence"] = strategy.cadence.value
         report.extras["train_test_split"] = self._cfg.backtest.train_test_split
         report.extras["oos_boundary"] = f"train<= {train_end} | test>= {test_start}"
         report.extras["engines"] = ", ".join(
             f"{e.name}({'ok' if e.available()[0] else 'unavailable'})"
-            for e in self._engines)
+            for e in self._engines_for(strategy))
         return report
 
     def run_and_save(
-        self, strategy: Strategy, start: date, end: date, root: Path
+        self, strategy: Strategy, start: date, end: date, root: Path,
+        *, research: bool = False,
     ) -> StrategyReport:
         """Run, save, and record the verdict in the promotion ledger.
 
@@ -178,11 +186,14 @@ class Pipeline:
         """
         report = self.run(strategy, start, end)
         report.save(root)
-        full = report.get("full", "real")
+        # the verdict is judged on TEST/real; recording the FULL number next
+        # to it made the ledger's avg ~70% in-sample (audit D-102)
+        test = report.get("test", "real")
         record_backtest(
             strategy.name, report.verdict,
-            full.avg_monthly_return if full else None,
-            module_path=_module_path(strategy))
+            test.avg_monthly_return if test else None,
+            module_path=_module_path(strategy),
+            research=research)
         return report
 
 
@@ -193,16 +204,3 @@ def _module_path(strategy: Strategy) -> Path | None:
         return Path(inspect.getfile(type(strategy)))
     except (TypeError, OSError):
         return None
-
-
-def _equity_series(result: BacktestResult) -> pd.Series:
-    curve = getattr(result, "equity_curve", None)
-    if curve is None:
-        return pd.Series(dtype=float)
-    if isinstance(curve, pd.Series):
-        s = curve
-    else:
-        s = pd.Series(curve)
-    if not isinstance(s.index, pd.DatetimeIndex) and len(s):
-        s.index = pd.to_datetime(s.index)
-    return s.sort_index()

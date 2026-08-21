@@ -23,6 +23,7 @@ fail one at a time later.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,6 +34,8 @@ import httpx
 from catalyst.core.interfaces import Broker
 from catalyst.core.symbology import parse_osi, to_alpaca_symbol
 from catalyst.core.types import (
+    EquityKey,
+    InstrumentKey,
     AccountState,
     Direction,
     ExitRules,
@@ -125,34 +128,57 @@ class AlpacaBroker(Broker):
     def place_order(self, order: Order) -> OrderResult:
         if not order.legs:
             return OrderResult(order_id="", status=OrderStatus.REJECTED, message="no legs")
+        # Limit-only discipline is enforced HERE too, not just upstream: this
+        # adapter must never be able to construct a market order (audit D-197).
+        if order.limit_price is None:
+            return OrderResult(order_id="", status=OrderStatus.REJECTED,
+                               message="refused: no limit price (market orders are banned)")
 
         side_of = {Side.BUY: "buy", Side.SELL: "sell"}
+        # OPEN vs CLOSE must reach the exchange: transmitting a close as an
+        # open DOUBLES exposure at the exact moment the system decided to
+        # reduce it (audit D-001 — the worst defect in the census).
+        closing = order.intent is OrderIntent.CLOSE
+        intent_of = {Side.BUY: ("buy_to_close" if closing else "buy_to_open"),
+                     Side.SELL: ("sell_to_close" if closing else "sell_to_open")}
+
+        def _symbol(key) -> str:
+            return key.underlying if isinstance(key, EquityKey) else to_alpaca_symbol(key)
+
         if len(order.legs) == 1:
             leg = order.legs[0]
             payload: dict[str, Any] = {
-                "symbol": to_alpaca_symbol(leg.key),
+                "symbol": _symbol(leg.key),
                 "qty": str(leg.qty),
                 "side": side_of[leg.side],
-                "type": "limit" if order.limit_price is not None else "market",
+                "type": "limit",
                 "time_in_force": "day",
             }
+            if not isinstance(leg.key, EquityKey):
+                payload["position_intent"] = intent_of[leg.side]
         else:
+            # Unit decomposition by GCD — min()//truncation silently converted
+            # ratio structures into different structures (audit D-003).
+            from functools import reduce
+            units = reduce(math.gcd, (l.qty for l in order.legs))
+            if units <= 0 or any(l.qty % units for l in order.legs):
+                return OrderResult(order_id="", status=OrderStatus.REJECTED,
+                                   message="refused: leg quantities share no integral unit")
             payload = {
                 "order_class": "mleg",
-                "qty": str(min(l.qty for l in order.legs)),
-                "type": "limit" if order.limit_price is not None else "market",
+                "qty": str(units),
+                "type": "limit",
                 "time_in_force": "day",
-                "legs": [{"symbol": to_alpaca_symbol(l.key),
-                          "ratio_qty": str(l.qty // max(min(x.qty for x in order.legs), 1)),
+                "legs": [{"symbol": _symbol(l.key),
+                          "ratio_qty": str(l.qty // units),
                           "side": side_of[l.side],
-                          "position_intent": ("buy_to_open" if l.side is Side.BUY
-                                              else "sell_to_open")}
+                          "position_intent": intent_of[l.side]}
                          for l in order.legs],
             }
-        # Limit-only discipline: a market order is never constructed by the
-        # execution layer, so this branch exists only for completeness.
-        if order.limit_price is not None:
-            payload["limit_price"] = f"{abs(order.limit_price):.2f}"
+        # The SIGN of the net limit price is the credit/debit carrier in
+        # Alpaca's mleg API (negative = credit). abs() flipped every credit
+        # order into a debit order (audit D-004).
+        payload["limit_price"] = f"{order.limit_price:.2f}"
 
         try:
             data = self._req("POST", "/v2/orders", json=payload)
@@ -160,11 +186,14 @@ class AlpacaBroker(Broker):
             logger.error("order rejected: %s", e)
             return OrderResult(order_id="", status=OrderStatus.REJECTED, message=str(e))
 
+        raw_fill = data.get("filled_avg_price")
         return OrderResult(
             order_id=str(data.get("id", "")),
             status=_map_status(data.get("status", "")),
             filled_qty=int(float(data.get("filled_qty", 0) or 0)),
-            avg_fill_price=float(data.get("filled_avg_price") or 0.0),
+            # None means "not filled yet" and must SURVIVE — coalescing to 0.0
+            # fabricated a $0 fill for every resting order (audit D-030).
+            avg_fill_price=float(raw_fill) if raw_fill is not None else None,
             message=str(data.get("status", "")))
 
     def modify_order(self, order_id: str, changes: dict[str, Any]) -> OrderResult:
@@ -173,19 +202,44 @@ class AlpacaBroker(Broker):
                            status=_map_status(data.get("status", "")))
 
     def cancel_order(self, order_id: str) -> OrderResult:
+        """Cancelation is ASYNC at Alpaca (202 = requested, not done). The
+        order can still fill after this returns; callers must re-poll before
+        treating the qty as free (audit D-104)."""
         self._req("DELETE", f"/v2/orders/{order_id}")
-        return OrderResult(order_id=order_id, status=OrderStatus.CANCELED)
+        return OrderResult(order_id=order_id, status=OrderStatus.ACCEPTED,
+                           message="cancel requested (async — re-poll for terminal state)")
 
     def get_positions(self) -> list[Position]:
-        """Broker-truth positions. Reconciliation reads this, never memory."""
+        """Broker-truth positions. Reconciliation reads this, never memory.
+
+        Every row is represented: options as OptionKey legs, shares as
+        EquityKey legs, and an unparseable option-shaped symbol is a loud
+        error — silently dropping rows made adjusted positions invisible to
+        the risk layer (audit D-031).
+        """
         out: list[Position] = []
         for p in self._req("GET", "/v2/positions"):
-            symbol = p.get("symbol", "")
-            key = _key_from_occ(symbol)
-            if key is None:
-                continue          # equity leg; option strategies ignore it
+            symbol = str(p.get("symbol", ""))
+            asset_class = str(p.get("asset_class", "")).lower()
+            if asset_class == "us_option" or _looks_like_occ(symbol):
+                try:
+                    key: InstrumentKey = parse_osi(symbol)
+                except ValueError as e:
+                    raise AlpacaError(
+                        f"unparseable option position symbol {symbol!r}: {e} — "
+                        "refusing to reconcile with an incomplete book") from e
+                mult = 100.0
+            else:
+                key = EquityKey(underlying=symbol)
+                mult = 1.0
             qty = int(float(p.get("qty", 0) or 0))
+            if qty == 0:
+                continue
             side = Side.BUY if qty > 0 else Side.SELL
+            market_value = float(p.get("market_value", 0) or 0)
+            # Position.current_value is PER-UNIT net per share; Alpaca's
+            # market_value is TOTAL dollars (audit D-032).
+            per_unit = market_value / (abs(qty) * mult) if qty else 0.0
             out.append(Position(
                 position_id=symbol,
                 legs=[PositionLeg(key=key, side=side, qty=1)],
@@ -195,7 +249,7 @@ class AlpacaBroker(Broker):
                 engine_tag="broker",
                 direction=Direction.NEUTRAL,
                 exit_rules=ExitRules(),
-                current_value=float(p.get("market_value", 0) or 0)))
+                current_value=per_unit))
         return out
 
     def get_account(self) -> AccountState:
@@ -210,19 +264,36 @@ class AlpacaBroker(Broker):
         self._client.close()
 
 
+_STATUS_MAP = {
+    "new": OrderStatus.ACCEPTED, "accepted": OrderStatus.ACCEPTED,
+    "pending_new": OrderStatus.ACCEPTED, "accepted_for_bidding": OrderStatus.ACCEPTED,
+    "held": OrderStatus.ACCEPTED, "suspended": OrderStatus.ACCEPTED,
+    "stopped": OrderStatus.ACCEPTED, "calculated": OrderStatus.ACCEPTED,
+    "pending_cancel": OrderStatus.ACCEPTED, "pending_replace": OrderStatus.ACCEPTED,
+    "partially_filled": OrderStatus.PARTIALLY_FILLED,
+    "filled": OrderStatus.FILLED,
+    "canceled": OrderStatus.CANCELED, "cancelled": OrderStatus.CANCELED,
+    "expired": OrderStatus.CANCELED, "done_for_day": OrderStatus.CANCELED,
+    "replaced": OrderStatus.CANCELED,
+    "rejected": OrderStatus.REJECTED,
+}
+
+
 def _map_status(raw: str) -> OrderStatus:
-    return {
-        "new": OrderStatus.ACCEPTED, "accepted": OrderStatus.ACCEPTED,
-        "pending_new": OrderStatus.ACCEPTED, "partially_filled": OrderStatus.PARTIALLY_FILLED,
-        "filled": OrderStatus.FILLED, "canceled": OrderStatus.CANCELED,
-        "cancelled": OrderStatus.CANCELED, "expired": OrderStatus.CANCELED,
-        "rejected": OrderStatus.REJECTED,
-    }.get(raw.lower(), OrderStatus.ACCEPTED)
+    """Every documented Alpaca status mapped explicitly; an UNKNOWN status is
+    logged loudly and treated as still-live (ACCEPTED) — assuming a live order
+    is dead is the more dangerous direction (audit D-105)."""
+    status = _STATUS_MAP.get(raw.lower())
+    if status is None:
+        logger.error("UNKNOWN Alpaca order status %r — treating as ACCEPTED; "
+                     "verify manually", raw)
+        return OrderStatus.ACCEPTED
+    return status
 
 
-def _key_from_occ(symbol: str):
-    """Compact OSI -> canonical OptionKey; None when it is not an option."""
-    try:
-        return parse_osi(symbol)
-    except Exception:
-        return None
+def _looks_like_occ(symbol: str) -> bool:
+    """Option-shaped: >=15 chars ending in C/P + 8 digits."""
+    return (len(symbol) >= 15 and symbol[-9] in "CP" and symbol[-8:].isdigit())
+
+
+

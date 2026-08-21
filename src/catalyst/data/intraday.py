@@ -124,7 +124,19 @@ class AlpacaMinuteBars:
                 break
 
         df = pd.DataFrame(rows, columns=["ts", *_BAR_COLUMNS])
-        self._cache.put("alpaca_minute", key, df)
+        # duplicate/sort hygiene mirrors contract_day (audit D-214): vendor
+        # duplicates or overlapping pages must not reach the cache
+        if not df.empty:
+            df = (df.sort_values("ts")
+                    .drop_duplicates(subset="ts", keep="last")
+                    .reset_index(drop=True))
+        # An IN-PROGRESS session cached as complete freezes a partial day
+        # forever (audit D-050): only finished sessions are cacheable.
+        if day < date.today():
+            self._cache.put("alpaca_minute", key, df)
+        else:
+            logger.info("%s %s is today/future — served fresh, not cached",
+                        symbol, day)
         if df.empty:
             return pd.DataFrame(columns=_BAR_COLUMNS)
         return df.set_index(pd.to_datetime(df["ts"])).drop(columns=["ts"])
@@ -164,6 +176,7 @@ class AlpacaMinuteBars:
         if cached is None:
             rows: list[dict[str, object]] = []
             page_token: str | None = None
+            fetch_ok = True
             while True:
                 params: dict[str, str] = {
                     "timeframe": "1Day", "start": start.isoformat(), "end": end.isoformat(),
@@ -173,6 +186,13 @@ class AlpacaMinuteBars:
                     params["page_token"] = page_token
                 payload = _request_with_retry(self._http, symbol, params)
                 if payload is None:
+                    # AUDIT CRITICAL (D-009/D-051): a transient failure —
+                    # whether on page 1 (empty) or mid-pagination (truncated)
+                    # — was cached PERMANENTLY as this symbol's daily history,
+                    # feeding every RV/hist-move/signal computation forever.
+                    fetch_ok = False
+                    logger.warning("daily bars fetch failed for %s %s..%s "
+                                   "(NOT cached)", symbol, start, end)
                     break
                 for bar in payload.get("bars") or []:
                     rows.append({"day": bar["t"][:10], "open": float(bar["o"]),
@@ -181,7 +201,8 @@ class AlpacaMinuteBars:
                 if not page_token:
                     break
             cached = pd.DataFrame(rows, columns=["day", "open", "close"])
-            self._cache.put("alpaca_daily_sip", key, cached)
+            if fetch_ok:
+                self._cache.put("alpaca_daily_sip", key, cached)
         return cached
 
     def prior_close(self, symbol: str, day: date, closes: pd.Series | None = None) -> float | None:
@@ -259,7 +280,12 @@ def five_minute_candles(minute_bars: pd.DataFrame, session_open: time,
     """
     if minute_bars.empty:
         return pd.DataFrame(columns=[*_BAR_COLUMNS])
-    rth = minute_bars[minute_bars.index.time >= session_open]
+    # Clip to the REGULAR session: get_day frames span 04:00-20:00, and an
+    # open-only filter let after-hours bars form 16:00+ "candles" that fed
+    # signals and fills (audit D-132).
+    session_close = time(16, 0)
+    rth = minute_bars[(minute_bars.index.time >= session_open)
+                      & (minute_bars.index.time < session_close)]
     if rth.empty:
         return pd.DataFrame(columns=[*_BAR_COLUMNS])
     origin = pd.Timestamp(datetime.combine(rth.index[0].date(), session_open))

@@ -96,12 +96,20 @@ class RiskManager:
             ha is not None and hb is not None and not ha.empty and not hb.empty
             and isinstance(ha.index, pd.DatetimeIndex) and isinstance(hb.index, pd.DatetimeIndex)
         ):
-            cutoff = pd.Timestamp(upto)
+            # STRICTLY before the decision session: its own 16:00 close is
+            # not printed at the 15:45 decision (audit D-225).
+            cutoff = pd.Timestamp(upto) - pd.Timedelta(days=1)
             ra = ha.loc[:cutoff, "close"].pct_change().dropna().tail(self._cfg.correlation_lookback_days)
             rb = hb.loc[:cutoff, "close"].pct_change().dropna().tail(self._cfg.correlation_lookback_days)
             joined = pd.concat([ra, rb], axis=1, join="inner").dropna()
             if len(joined) >= self._cfg.correlation_lookback_days // 2:
                 corr = float(joined.iloc[:, 0].corr(joined.iloc[:, 1]))
+                if corr != corr:
+                    # zero-variance window -> NaN. Unknown correlation must
+                    # COUNT as correlated, not vanish (audit D-148): the cap
+                    # exists to bound clustered risk, and "can't measure" is
+                    # not "uncorrelated".
+                    corr = 1.0
         self._corr_cache[key] = corr
         return corr
 

@@ -24,6 +24,7 @@ Here, no strategy can opt out. Every run produces:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
@@ -32,6 +33,8 @@ import pandas as pd
 
 from catalyst.backtest import metrics as m
 from catalyst.core.types import TradeRecord
+
+logger = logging.getLogger(__name__)
 
 #: Engine C at N=85 implied roughly +1%/yr before it was refuted at scale.
 #: Everything is measured against it so "better than nothing" is a number.
@@ -72,6 +75,13 @@ class StrategyReport:
     end: date
     segments: list[SegmentReport] = field(default_factory=list)
     extras: dict = field(default_factory=dict)
+    #: per (segment, profile) TradeRecord lists — persisted as CSVs by save()
+    #: so tail-event / concentration / walk-forward analysis can audit every
+    #: trade instead of trusting the aggregates.
+    ledgers: dict = field(default_factory=dict)
+    #: per (segment, profile) daily equity Series — persisted alongside, for
+    #: walk-forward windows and drawdown rendering.
+    equities: dict = field(default_factory=dict)
     #: One EngineComparison per (segment, cost profile). The verdict is still
     #: computed from the NATIVE engine, because it is the only one that owns
     #: risk sizing, the cost model and exits — but a divergence downgrades the
@@ -99,6 +109,10 @@ class StrategyReport:
         if self.engines_diverge:
             return ("HOLD — engines disagree on the P&L; resolve before "
                     "reading any number here")
+        missing = self.extras.get("segments_missing")
+        if missing:
+            return (f"NO RESULT — segment(s) failed to produce: "
+                    f"{', '.join(missing)}; the mandatory matrix is incomplete")
         # AUDIT HIGH: never fall back to the FULL segment — that is 70%
         # training data wearing an out-of-sample label, and it once granted
         # validated=True from an in-sample number. No test segment, no verdict.
@@ -137,9 +151,10 @@ class StrategyReport:
             L += [f"\n  AVG MONTHLY RETURN: {full.avg_monthly_return:+.2%}"
                   f"     (CAGR {full.cagr:+.1%}, max DD {full.max_drawdown:+.1%})"]
         gap = self.cost_gap
-        if gap is not None:
+        zero_full = self.get("full", "zero")
+        if gap is not None and zero_full is not None:
             L.append(f"  cost drag: {gap:+.2%}/mo  "
-                     f"(zero-cost {self.get('full','zero').avg_monthly_return:+.2%}/mo)")
+                     f"(zero-cost {zero_full.avg_monthly_return:+.2%}/mo)")
         L.append("")
         hdr = (f"  {'segment':<8}{'cost':<7}{'monthly':>10}{'CAGR':>9}{'maxDD':>9}"
                f"{'N':>6}{'win':>7}{'PF':>7}{'top3':>7}")
@@ -170,17 +185,44 @@ class StrategyReport:
         return "\n".join(L)
 
     def to_json(self) -> str:
+        def _clean(o):
+            # inf/NaN are not JSON (audit D-146): a no-loss segment carries
+            # profit_factor=inf and allow_nan emitted invalid JSON that
+            # json.loads-strict consumers reject
+            if isinstance(o, float):
+                if o != o:
+                    return None
+                if o == float("inf"):
+                    return "inf"
+                if o == float("-inf"):
+                    return "-inf"
+                return o
+            if isinstance(o, dict):
+                return {k: _clean(v) for k, v in o.items()}
+            if isinstance(o, (list, tuple)):
+                return [_clean(v) for v in o]
+            return o
         return json.dumps(
-            {"strategy": self.strategy, "start": str(self.start), "end": str(self.end),
-             "verdict": self.verdict, "cost_gap": self.cost_gap,
-             "segments": [asdict(s) for s in self.segments], "extras": self.extras,
-             "engines_diverge": self.engines_diverge,
-             "engine_comparisons": [c.to_dict() for c in self.comparisons]},
-            indent=2, default=str)
+            _clean({"strategy": self.strategy, "start": str(self.start),
+                    "end": str(self.end),
+                    "verdict": self.verdict, "cost_gap": self.cost_gap,
+                    "segments": [asdict(s) for s in self.segments],
+                    "extras": self.extras,
+                    "engines_diverge": self.engines_diverge,
+                    "engine_comparisons": [c.to_dict() for c in self.comparisons]}),
+            indent=2, allow_nan=False, default=str)
 
     def save(self, root: Path) -> Path:
         root.mkdir(parents=True, exist_ok=True)
         (root / "report.txt").write_text(self.to_text())
+        for key, trades in self.ledgers.items():
+            if trades:
+                pd.DataFrame([t.model_dump() for t in trades]).to_csv(
+                    root / f"trades_{key}.csv", index=False)
+        for key, eq in self.equities.items():
+            if eq is not None and len(eq):
+                eq.rename("equity").to_csv(root / f"equity_{key}.csv",
+                                           index_label="date")
         path = root / "report.json"
         path.write_text(self.to_json())
         return path
@@ -190,6 +232,13 @@ def build_segment(
     segment: str, cost_profile: str, equity: pd.Series, trades: list[TradeRecord]
 ) -> SegmentReport:
     """Compute one cell. Every check runs here — none is optional."""
+    if len(equity) <= 1 and trades:
+        # metrics of a 0/1-point curve are undefined, not zero: reporting
+        # flat zeros next to n_trades>0 was indistinguishable from a real
+        # flat result (audit D-222)
+        logger.warning("build_segment %s/%s: %d trades but %d equity points — "
+                       "metrics undefined", segment, cost_profile, len(trades),
+                       len(equity))
     h = m.headline(equity) if len(equity) > 1 else {
         "avg_monthly_return": 0.0, "cagr": 0.0, "max_drawdown": 0.0,
         "pct_months_positive": 0.0}

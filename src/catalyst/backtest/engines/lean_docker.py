@@ -137,8 +137,13 @@ class LeanDockerEngine(BacktestEngine):
         # LEAN charges commission through its own brokerage model; the
         # zero-cost twin removes it there rather than in our cost code, so the
         # diagnostic stays an independent measurement.
-        config["transaction-model"] = ("QuantConnect.Orders.Fees.ConstantFeeModel"
-                                       if zero_cost else "")
+        # LEAN ignores unknown/empty keys silently: an empty string here did
+        # NOT restore the default fee model by contract, it just happened to
+        # (audit D-083). Set the key only when zeroing; delete it otherwise.
+        if zero_cost:
+            config["transaction-model"] = "QuantConnect.Orders.Fees.ConstantFeeModel"
+        else:
+            config.pop("transaction-model", None)
         cfg_path = LEAN_ROOT / "config.json"
         cfg_path.write_text(json.dumps(config, indent=2))
 

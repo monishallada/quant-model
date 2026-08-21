@@ -100,8 +100,13 @@ class StrategyContext:
         # copied wrong and swallows a real error.
         try:
             return self.data.get_chain(symbol, self.as_of, expiries=expiries)
-        except Exception:                                # noqa: BLE001
-            return None
+        except Exception as e:                           # noqa: BLE001
+            from catalyst.data.thetadata_historical import DataUnavailableError
+            if isinstance(e, DataUnavailableError):
+                return None      # "no data" is normal (holidays, thin names)
+            # dead terminals / code faults must SURFACE, not read as
+            # "no chain today" (audit D-119)
+            raise
 
 
 class Strategy(ABC):
@@ -171,6 +176,11 @@ class CatalystStrategy(Strategy):
             return None
         chain = ctx.chain(opp.symbol)
         if chain is None:
+            return None
+        if ctx.signal is None:
+            # evaluate() declares signal: SignalResult, and several archived
+            # engines dereference it unconditionally (audit D-120): a missing
+            # signal is a skipped opportunity, never a crash
             return None
         return self.evaluate(opp.catalyst, chain, ctx.signal, ctx.as_of)
 

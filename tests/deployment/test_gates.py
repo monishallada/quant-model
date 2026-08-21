@@ -39,7 +39,9 @@ def ledger_in_tmp(tmp_path, monkeypatch):
 
 
 def _meta(name="demo") -> StrategyMeta:
-    return StrategyMeta(name=name, module="catalyst.strategies.active.long_options")
+    # a module that RESOLVES: since D-064 an unresolvable module is itself a
+    # live refusal, so the happy-path fixture must point at real code
+    return StrategyMeta(name=name, module="catalyst.strategies.archive.short_vrp.strategy")
 
 
 class TestPromotionIsEarnedNotDeclared:
@@ -55,19 +57,19 @@ class TestPromotionIsEarnedNotDeclared:
         """Running paper on an unvalidated strategy must not grant anything."""
         record_backtest("demo", FAIL, -0.01)
         with pytest.raises(PermissionError):
-            record_paper_session("demo", "PA-TEST")
+            record_paper_session("demo", "PA-TEST", orders_seen=2, round_trips=1)
         assert not PromotionRecord.load("demo").paper_tested
 
     def test_full_path_backtest_then_paper_grants_live(self):
         record_backtest("demo", PASS, 0.011)
-        record_paper_session("demo", "PA-TEST", orders_seen=3)
+        record_paper_session("demo", "PA-TEST", orders_seen=3, round_trips=1)
         ok, reason = check_live_eligibility("demo")
         assert ok, reason
 
     def test_a_failing_rerun_withdraws_validation_and_paper(self):
         """A strategy cannot be validated once and then edited freely."""
         record_backtest("demo", PASS, 0.011)
-        record_paper_session("demo", "PA-TEST")
+        record_paper_session("demo", "PA-TEST", orders_seen=2, round_trips=1)
         record_backtest("demo", FAIL, -0.02)
         rec = PromotionRecord.load("demo")
         assert not rec.validated and not rec.paper_tested
@@ -77,7 +79,7 @@ class TestPromotionIsEarnedNotDeclared:
         module = tmp_path / "strat.py"
         module.write_text("# v1\n")
         record_backtest("demo", PASS, 0.011, module_path=module)
-        record_paper_session("demo", "PA-TEST")
+        record_paper_session("demo", "PA-TEST", orders_seen=2, round_trips=1)
         assert check_live_eligibility("demo", module)[0]
 
         module.write_text("# v2 — quietly different\n")
@@ -98,7 +100,7 @@ class TestLiveRequiresBacktestAndPaper:
 
     def test_both_passed_clears_preconditions(self):
         record_backtest("demo", PASS, 0.011)
-        record_paper_session("demo", "PA-TEST")
+        record_paper_session("demo", "PA-TEST", orders_seen=2, round_trips=1)
         enforce_preconditions(_meta(), Mode.LIVE)
 
     @pytest.mark.parametrize("mode", [Mode.BACKTEST, Mode.PAPER])

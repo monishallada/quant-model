@@ -1,0 +1,27 @@
+{
+  "name": "short_vrp",
+  "module": "catalyst.strategies.archive.short_vrp.strategy",
+  "status": "archived",
+  "date_tested": "2026-08-20",
+  "verdict": "REJECT \u2014 negative at zero AND real cost across 9 configurations; friction is 55-66% of collected credit",
+  "avg_monthly_return": -0.0012881340849996148,
+  "baseline_annual": 0.01,
+  "validated": false,
+  "paper_tested": false,
+  "notes": "v14. Defined-risk iron condors on gated catalyst premium. Gross edge unresolvable at N=27-36 (all CIs straddle zero); real-cost decisively negative where N=171 (P(profit)=0.0%). Strike-delta sweep has a genuine interior optimum at 0.10D that still loses $80/trade. Fill frontier: break-even ~40% of quoted spread (v12 index: ~45%) \u2014 revival requires MEASURED broker execution quality, not another backtest.",
+  "key_metrics": {
+    "full_real_monthly": -0.0012881340849996148,
+    "full_zero_monthly": -0.0002826537947110408,
+    "test_real_monthly": -0.0024,
+    "test_n": 16,
+    "full_n": 34,
+    "friction_pct_of_credit": "55-66%",
+    "breakeven_spread_capture": 0.4,
+    "delta_optimum": 0.1,
+    "ungated_n171_real_per_trade_ci": [
+      -454,
+      -237
+    ],
+    "cap_breaches_at_mid": 0
+  }
+}

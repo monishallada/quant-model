@@ -25,7 +25,7 @@ import pandas as pd
 from catalyst.backtest import metrics as m
 from catalyst.core.interfaces.engine import EngineResult
 
-#: Relative gap in average monthly return above which engines are called
+#: Absolute monthly-return gap in average monthly return above which engines are called
 #: divergent. Tight on purpose: engines running the same fills should agree to
 #: rounding, so anything above this is a real difference in arithmetic.
 DIVERGENCE_TOLERANCE = 0.01       # 1%/month. The v8 double-count was
@@ -113,7 +113,7 @@ class EngineComparison:
             if v.avg_monthly_return is None:
                 continue
             # Primary check: same fills must sum to the same dollar.
-            if (v.final_equity is not None and ref.final_equity
+            if (v.final_equity is not None and ref.final_equity is not None
                     and abs(v.final_equity - ref.final_equity)
                     > abs(ref.final_equity) * EQUITY_TOLERANCE):
                 out.append({"engine": v.engine, "reference": ref.engine,
@@ -163,7 +163,7 @@ class EngineComparison:
             L.append("    Independent engines size off their OWN equity, so paths drift")
             L.append("    even when both are right. Agreement here means neither shows a")
             L.append("    sign error, missing multiplier or double-counted premium.")
-            if ref and ref.final_equity:
+            if ref and ref.final_equity is not None:
                 L.append(f"    final equity matches across engines "
                          f"({ref.final_equity:,.2f}); monthly/maxDD may differ "
                          "slightly by marking frequency, not arithmetic.")

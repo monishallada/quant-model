@@ -1,4 +1,11 @@
-"""NautilusTrader engine — a genuinely INDEPENDENT second backtest.
+"""
+[CROSS-CHECK ENGINE — audit v15 note] This adapter is an OPT-IN
+independent re-implementation used only to disagree with the native engine.
+Known approximations (audit D-087/D-178/D-179/D-180): shadow sizing holds
+equity at starting capital, reserves at a flat 100x multiplier, and the
+fill-model mapping treats spread_fill_fraction approximately. Its numbers are
+for DIVERGENCE DETECTION, never for reporting.
+NautilusTrader engine — a genuinely INDEPENDENT second backtest.
 
 This is not a replay of the native engine's fills. Nautilus runs its own
 backtest end to end:
@@ -40,6 +47,9 @@ logger = logging.getLogger(__name__)
 
 VENUE_NAME = "OPRA"
 MULTIPLIER = 100
+# snapshot follows cfg.data.snapshot_time at run() time; this module-level
+# value is only the fallback (audit D-086: the constant silently diverged
+# from config)
 SNAP = time(15, 45)
 PRICE_PRECISION = 4
 

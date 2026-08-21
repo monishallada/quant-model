@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from catalyst.core.config import ScreenerConfig
-from catalyst.core.types import Catalyst, OptionChain, OptionContract, OptionRight
+from catalyst.core.types import CatalystType, Catalyst, OptionChain, OptionContract, OptionRight
 from catalyst.data.catalysts import resolve_reaction_session
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,12 @@ def _atm_pair(
     if not shared:
         return None
     strike = min(shared, key=lambda k: abs(k - chain.underlying_price))
+    # A "straddle" 10%+ from spot is not an ATM straddle: its price is
+    # dominated by intrinsic and the implied move computed from it is
+    # fiction (audit D-227).
+    if chain.underlying_price > 0 and \
+            abs(strike - chain.underlying_price) / chain.underlying_price > 0.10:
+        return None
     return calls[strike], puts[strike]
 
 
@@ -66,6 +72,10 @@ class CatalystScreener:
             return None
         call, put = pair
 
+        # Crossed or inverted quotes make spread_pct NEGATIVE, which passes a
+        # "> max" gate forever and pushes liq_score above 1 (audit D-156).
+        if call.bid > call.ask or put.bid > put.ask:
+            return None
         straddle_mid = call.mid + put.mid
         implied_move = straddle_mid / chain.underlying_price
         spread_pct = max(call.spread_pct_of_mid, put.spread_pct_of_mid)
@@ -80,8 +90,15 @@ class CatalystScreener:
             rejected = f"volume {volume} < {cfg.liquidity.min_option_volume}"
         elif oi < cfg.liquidity.min_open_interest:
             rejected = f"OI {oi} < {cfg.liquidity.min_open_interest}"
-        elif implied_move < cfg.min_implied_move:
-            rejected = f"implied move {implied_move:.1%} < {cfg.min_implied_move:.1%}"
+        else:
+            # Index products move ~1/4 of a single name around macro prints;
+            # one absolute floor structurally excluded every CPI/FOMC event
+            # (audit D-068: 15 of ~170 macro events ever reached evaluation).
+            floor = cfg.min_implied_move
+            if catalyst.type in (CatalystType.CPI, CatalystType.FOMC):
+                floor = cfg.min_implied_move * cfg.macro_move_floor_fraction
+            if implied_move < floor:
+                rejected = f"implied move {implied_move:.1%} < {floor:.1%}"
 
         # Normalized 0..1 factors -> weighted geometric mean.
         liq_score = max(0.0, 1.0 - spread_pct / cfg.liquidity.max_spread_pct_of_mid)

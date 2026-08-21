@@ -32,6 +32,8 @@ from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
 
+import yaml
+
 from catalyst.core.config import load_config
 from catalyst.core.interfaces import Broker, Cadence, DataSource, Strategy
 from catalyst.screener.catalyst_screener import CatalystScreener
@@ -93,11 +95,11 @@ def build_wiring(mode: Mode, cfg, *, dry_run: bool = False) -> Wiring:
     if mode is Mode.PAPER:
         from catalyst.brokers.alpaca import AlpacaBroker, AlpacaCredentials
         broker = AlpacaBroker(AlpacaCredentials.from_env(paper=True))
-        return Wiring(mode, data, broker, f"live data + AlpacaBroker @ {broker.endpoint}")
+        return Wiring(mode, data, broker, f"ThetaData/Alpaca historical data + AlpacaBroker @ {broker.endpoint}")
 
     from catalyst.brokers.schwab import SchwabBroker, SchwabCredentials
     broker = SchwabBroker(SchwabCredentials.from_env())
-    return Wiring(mode, data, broker, "live data + SchwabBroker (REAL MONEY)")
+    return Wiring(mode, data, broker, "ThetaData/Alpaca historical data + SchwabBroker (REAL MONEY)")
 
 
 # ----------------------------------------------------------------------
@@ -105,7 +107,11 @@ def build_wiring(mode: Mode, cfg, *, dry_run: bool = False) -> Wiring:
 # ----------------------------------------------------------------------
 def _confirm(prompt: str, expect: str) -> bool:
     """Typed confirmation. No default, no y/N shortcut — the operator types
-    the exact word or nothing happens."""
+    the exact word or nothing happens. Refused outright when stdin is not a
+    terminal: `echo LIVE | ...` is automation, not confirmation (audit D-152)."""
+    if not sys.stdin.isatty():
+        logger.critical("confirmation required but stdin is not a terminal — refused")
+        return False
     try:
         answer = input(f"{prompt}\nType {expect!r} to proceed: ").strip()
     except (EOFError, KeyboardInterrupt):
@@ -166,12 +172,22 @@ def enforce_preconditions(meta: StrategyMeta, mode: Mode) -> None:
         return
     from catalyst.strategies.promotion import check_live_eligibility
 
-    module_path = None
+    # Eligibility first, so "not validated / never paper-tested" — the refusal
+    # that actually protects the operator — is never masked by a module-path
+    # error (this module's own ordering principle).
+    eligible, reason = check_live_eligibility(meta.name, None)
+    if not eligible:
+        raise DeploymentRefused(f"REFUSED: {reason}")
+    # Then the code fingerprint. Failure to RESOLVE the module used to be
+    # swallowed, silently skipping the hash comparison — live could run code
+    # that was never the validated code (audit D-064).
     try:
         import importlib, inspect
         module_path = Path(inspect.getfile(importlib.import_module(meta.module)))
-    except Exception:                                   # noqa: BLE001
-        pass
+    except Exception as e:                              # noqa: BLE001
+        raise DeploymentRefused(
+            f"REFUSED: cannot resolve strategy module '{meta.module}' for the "
+            f"validation fingerprint check: {e}") from e
     eligible, reason = check_live_eligibility(meta.name, module_path)
     if not eligible:
         raise DeploymentRefused(f"REFUSED: {reason}")
@@ -214,7 +230,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--strategy", required=True, help="registered strategy name")
     ap.add_argument("--start", type=date.fromisoformat, default=date(2018, 1, 2))
     ap.add_argument("--end", type=date.fromisoformat, default=date.today())
-    ap.add_argument("--config", default="backtest")
+    ap.add_argument("--config", default=None,
+                    help="config environment; defaults to the mode's own "
+                         "(backtest/paper/live) and must match it")
     ap.add_argument("--signal", default="neutral",
                     choices=["trend", "mean_reversion", "neutral"],
                     help="directional signal; strategies that carry their own "
@@ -223,17 +241,50 @@ def main(argv: list[str] | None = None) -> int:
                     help="reach the gate and build orders, but transmit nothing")
     ap.add_argument("--yes", action="store_true",
                     help="skip the paper prompt (never honoured for live)")
+    ap.add_argument("--cycles", type=int, default=390,
+                    help="paper/live session cycle bound (one per heartbeat)")
+    ap.add_argument("--set", dest="overrides", action="append", default=[],
+                    metavar="KEY=VALUE",
+                    help="dotted-path config override (repeatable), e.g. "
+                         "--set short_vrp.use_stops=false. BACKTEST MODE ONLY: "
+                         "research variants must never reconfigure paper/live.")
     args = ap.parse_args(argv)
+    if args.config is None:
+        args.config = args.mode.value
 
     configure_json_logging(logging.INFO)
-    cfg = load_config(args.config)
+    # Mode and config environment are ONE decision (audit D-015): paper/live
+    # silently running under backtest risk limits was possible because
+    # --config defaulted to "backtest" regardless of --mode.
+    expected_env = {Mode.BACKTEST: "backtest", Mode.PAPER: "paper",
+                    Mode.LIVE: "live"}[args.mode]
+    if args.config != expected_env:
+        raise DeploymentRefused(
+            f"REFUSED: --mode {args.mode.value} requires --config "
+            f"{expected_env!r}, got {args.config!r}. The mode's committed "
+            "config is not optional.")
+    overrides = {}
+    if args.overrides:
+        if args.mode is not Mode.BACKTEST:
+            raise DeploymentRefused(
+                "--set is a research knob; paper/live run only the committed config")
+        for item in args.overrides:
+            key, _, raw = item.partition("=")
+            if not key or not raw:
+                raise DeploymentRefused(f"malformed --set '{item}' (want KEY=VALUE)")
+            overrides[key.strip()] = yaml.safe_load(raw)
+        logger.info("config overrides: %s", overrides)
+    cfg = load_config(args.config, overrides=overrides or None)
 
     meta = registry().get(args.strategy)
     if meta is None:
         known = ", ".join(sorted(registry())) or "none"
         raise DeploymentRefused(f"unknown strategy '{args.strategy}'. Known: {known}")
 
-    kill = KillSwitch()
+    # ONE kill-switch truth: the config's declared file (audit D-042/D-061:
+    # config said KILL_SWITCH, code watched .catalyst_kill, and touching the
+    # documented file did nothing).
+    kill = KillSwitch(path=Path(cfg.observability.kill_switch_file))
     if kill.engaged():
         raise DeploymentRefused(f"REFUSED: kill switch engaged ({kill.reason()})")
 
@@ -266,7 +317,10 @@ def main(argv: list[str] | None = None) -> int:
                             signal=build_signal(args.signal, cfg))
         report = pipeline.run_and_save(
             strategy, args.start, args.end,
-            Path("results/active") / args.strategy)
+            Path("results/active") / args.strategy,
+            # --set variants are research: they must never write the
+            # canonical promotion evidence (audit D-070)
+            research=bool(overrides))
         print(report.to_text())
         return 0
 
@@ -280,21 +334,40 @@ def main(argv: list[str] | None = None) -> int:
               "paper session does.")
         return 0
 
+    # ---- the actual trading session (audit D-066/D-067: there was no loop:
+    # paper mode connected, granted paper_tested, and exited) ----------------
+    from catalyst.execution.session import TradingSession
+
+    catalysts = _load_catalysts(cfg, args.start, args.end) \
+        if strategy.cadence is Cadence.CATALYST else []
+    print(f"\nSession starting ({args.mode.value}). Kill switch: touch "
+          f"{kill.path} to halt new entries.")
+    session = TradingSession(
+        strategy=strategy, signal=build_signal(args.signal, cfg),
+        execution=execution, data=wiring.data, catalysts=catalysts,
+        interval_seconds=cfg.observability.heartbeat_seconds,
+        max_cycles=args.cycles)
+    stats = session.run()
+    print(f"session ended: {stats.cycles} cycles, "
+          f"{stats.entries_filled} entries, {stats.exits_filled} exits, "
+          f"{stats.round_trips} round trips, "
+          f"{stats.orders_rejected} rejected, {len(stats.errors)} errors")
+
     if args.mode is Mode.PAPER:
-        # paper_tested is granted by an actual session against a real paper
-        # account — never by a flag, a config value, or a dry run.
+        # paper_tested is granted by OBSERVED round trips in a real session —
+        # never by connecting (audit D-016).
         acct = ""
         try:
             acct = str(wiring.broker.preflight().get("account_number", ""))
         except Exception:                               # noqa: BLE001
             pass
         try:
-            record_paper_session(args.strategy, acct, len(state.positions))
+            record_paper_session(args.strategy, acct,
+                                 orders_seen=stats.entries_filled + stats.exits_filled,
+                                 round_trips=stats.round_trips)
             print(f"promotion: '{args.strategy}' is now paper-tested on {acct}")
         except PermissionError as e:
             print(f"\nNOTE: {e}")
-    print("\nSession live. Kill switch: touch "
-          f"{kill.path} to halt new entries immediately.")
     return 0
 
 

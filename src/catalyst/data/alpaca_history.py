@@ -65,9 +65,13 @@ class AlpacaDailyBars:
     ) -> pd.DataFrame:
         if interval != "1d":
             raise NotImplementedError("Only daily bars are supported")
-        key = f"{symbol}_{start:%Y%m%d}_{end:%Y%m%d}_1d"
+        # feed is part of the identity: the SIP switch (D-126) must not
+        # serve stale IEX frames cached under a feed-blind key
+        key = f"{symbol}_{start:%Y%m%d}_{end:%Y%m%d}_1d_sip"
         cached = self._cache.get("alpaca_bars", key)
         if cached is not None:
+            if cached.empty:
+                return _empty_bars()
             return cached.set_index(pd.to_datetime(cached["date"])).drop(columns=["date"])
 
         rows: list[dict[str, object]] = []
@@ -78,7 +82,10 @@ class AlpacaDailyBars:
                 "start": start.isoformat(),
                 "end": end.isoformat(),
                 "adjustment": "split",
-                "feed": "iex",
+                # SIP for parity with the intraday layer (audit D-126: daily signals
+                # were IEX — thinner venue, occasionally different closes — while
+                # minute data was SIP)
+                "feed": "sip",
                 "limit": "10000",
             }
             if page_token:
@@ -86,8 +93,12 @@ class AlpacaDailyBars:
             payload = self._get_with_retry(symbol, params)
             if payload is None:
                 # AUDIT HIGH: transient failure — never cache a truncated pull.
+                # The empty frame still honors the interface contract
+                # ("indexed by timestamp", audit D-045): consumers doing
+                # df.index.date or df["close"] must get an empty typed frame,
+                # not a shapeless one that crashes three layers away.
                 logger.warning("Bars pull failed mid-pagination (NOT cached)")
-                return pd.DataFrame()
+                return _empty_bars()
             for bar in payload.get("bars") or []:
                 rows.append(
                     {
@@ -105,8 +116,18 @@ class AlpacaDailyBars:
 
         df = pd.DataFrame(rows)
         if df.empty:
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+            # genuinely bar-less range: cache the empty answer (D-045: typed
+            # and datetime-indexed like every other return)
+            self._cache.put("alpaca_bars", key, df)
+            return _empty_bars()
         self._cache.put("alpaca_bars", key, df)
         out = df.set_index(pd.to_datetime(df["date"])).drop(columns=["date"])
         out.index.name = "date"
         return out
+
+
+def _empty_bars() -> pd.DataFrame:
+    """Empty frame that still honors the DataSource contract (audit D-045)."""
+    df = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+    df.index = pd.DatetimeIndex([], name="date")
+    return df

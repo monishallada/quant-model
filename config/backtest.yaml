@@ -1,28 +1,21 @@
 # Backtest environment overlay — merged on top of base.yaml.
 #
-# RESEARCH PROFILE: risk limits are DISABLED here by explicit decision
-# (owner instruction, 2026-08-20) so architecture search is unconstrained.
-# paper.yaml and live.yaml DO NOT inherit this block — deployment profiles
-# keep the full safeguard set, which is the "re-add before live" plan made
-# structural instead of remembered.
-#
-# What this does NOT touch: costs, OOS splits, lookahead guards, controls,
-# N/concentration checks. Those are the measuring instrument, not safeguards.
+# v14 short-VRP campaign: the strategy spec EXPLICITLY mandates the full
+# safeguard set (floor 40%, heat 25%, breakers, strict correlation) — a
+# market-wide vol event hits every short-vol position at once, so the
+# correlation cap is load-bearing here, not ceremonial. This supersedes the
+# earlier unconstrained research profile for this campaign.
 environment: backtest
 
 execution:
   commissions:
-    # AUDIT MEDIUM: alpaca profile = $0.00/contract, so every "real-cost" run
-    # charged zero option commissions. Schwab profile ($0.65/contract/side) is
-    # the conservative default consistent with the fill-frontier analysis.
-    active_profile: "schwab"
+    active_profile: "schwab"     # $0.65/contract/side — 4-leg condors pay 8x
 
 risk:
-  cash_floor_fraction: 0.0        # no reserve requirement
-  max_deployed: 1.0               # full deployment allowed
-  sizing_cost_buffer: 0.0         # no sizing haircut
-  hedge_fraction: 0.0             # no forced hedge sleeve
-  max_correlated_positions: 999   # correlation cap off
-  correlation_threshold: 0.9999
-  daily_loss_halt: -0.99          # breakers effectively off (schema needs <0)
-  weekly_loss_halt: -0.99
+  cash_floor_fraction: 0.40
+  max_deployed: 0.25
+  sizing_cost_buffer: 0.05
+  daily_loss_halt: -0.08
+  weekly_loss_halt: -0.15
+  max_correlated_positions: 3
+  correlation_threshold: 0.7

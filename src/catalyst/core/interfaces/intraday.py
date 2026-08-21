@@ -68,18 +68,18 @@ class IntradayContext:
         # Previous SESSION, not previous weekday: the weekday loop was blind
         # to holidays (audit LOW) and would request a chain for e.g. Good
         # Friday and silently return None.
-        try:
-            from catalyst.core.tradingcal import previous_trading_day
-            prior = previous_trading_day(self.session)
-        except Exception:                               # noqa: BLE001
-            prior = self.session - timedelta(days=1)
-            while prior.weekday() >= 5:
-                prior -= timedelta(days=1)
+        from catalyst.core.tradingcal import previous_trading_day
+        # no holiday-blind fallback (audit D-205): if the calendar cannot
+        # answer, that is a real fault to surface, not a weekday walk
+        prior = previous_trading_day(self.session)
         try:
             return self.data.get_chain(symbol, datetime.combine(prior, dtime(15, 45)),
                                        expiries=expiries, include_liquidity=False)
-        except Exception:                               # noqa: BLE001 — gap = no context
-            return None
+        except Exception as e:                               # noqa: BLE001 — gap = no context
+            from catalyst.data.thetadata_historical import DataUnavailableError
+            if isinstance(e, DataUnavailableError):
+                return None
+            raise
 
 
 class IntradayStrategy(Strategy):

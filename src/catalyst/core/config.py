@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import model_validator, BaseModel, ConfigDict, Field
 
 _ENV_VAR_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
@@ -91,6 +91,9 @@ class ScoreWeights(_FrozenModel):
 
 class ScreenerConfig(_FrozenModel):
     min_implied_move: float
+    #: macro (CPI/FOMC) implied-move floor as a fraction of min_implied_move —
+    #: index products move ~1/4 of a single name (audit D-068)
+    macro_move_floor_fraction: float = Field(default=0.25, gt=0.0, le=1.0)
     liquidity: LiquidityConfig
     fit_ideal_days: int
     fit_tolerance_days: int
@@ -429,6 +432,21 @@ class ObservabilityConfig(_FrozenModel):
     kill_switch_flatten: bool
 
 
+class ShortVRPConfig(_FrozenModel):
+    """v14 concentrated short-VRP (event iron condors)."""
+
+    iv_rank_min: float = Field(ge=0.0, le=1.0)
+    iv_rv_min: float = Field(gt=0.0)
+    implied_vs_hist_min: float = Field(gt=0.0)
+    short_delta: float = Field(gt=0.0, lt=0.5)
+    max_dte: int = Field(ge=1)
+    tp_credit_fraction: float = Field(gt=0.0, lt=1.0)
+    stop_credit_multiple: float = Field(gt=1.0)
+    use_stops: bool
+    per_trade_risk_fraction: float = Field(gt=0.0, le=0.10)
+    max_leg_spread_pct_of_mid: float = Field(gt=0.0, le=0.25)
+
+
 class Config(_FrozenModel):
     """Root configuration object injected throughout the system."""
 
@@ -446,6 +464,7 @@ class Config(_FrozenModel):
     tournament: TournamentConfigModel
     index_vrp: IndexVRPConfig
     persymbol: PerSymbolConfig
+    short_vrp: ShortVRPConfig
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig
@@ -502,6 +521,22 @@ def _apply_dotted_overrides(tree: dict[str, Any], overrides: dict[str, Any]) -> 
             node = node[part]
         node[parts[-1]] = value
     return out
+
+
+
+    @model_validator(mode="after")
+    def _buffer_covers_slippage(self) -> "Config":
+        """Sizing computes units from proposal-time max loss; real fills can
+        exceed it by the slippage terms. The sizing buffer is the headroom —
+        it must at least cover modeled slippage or realized loss can overshoot
+        the risk budget (audit D-124)."""
+        slip = self.execution.fill_model.slippage_pct_of_premium
+        if self.risk.sizing_cost_buffer < slip:
+            raise ValueError(
+                f"risk.sizing_cost_buffer ({self.risk.sizing_cost_buffer}) must "
+                f"cover fill_model.slippage_pct_of_premium ({slip}); otherwise "
+                "fills can overshoot the sized max-loss budget")
+        return self
 
 
 def load_config(

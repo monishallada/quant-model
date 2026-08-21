@@ -59,10 +59,14 @@ def bs_greeks(
     """Full first-order greeks (+gamma) at the given vol."""
     if t <= 0 or sigma <= 0:
         # Expired/degenerate: delta is a step function, everything else 0.
+        # For sigma->0 with t>0 the step is on the FORWARD (s*e^{(r-q)t}) vs
+        # strike, not spot vs strike — a near-the-money low-vol contract with
+        # positive carry sits on the other side of the step (audit D-127).
+        ref = s * math.exp((r - q) * t) if t > 0 else s
         if right is OptionRight.CALL:
-            delta = 1.0 if s > k else 0.0
+            delta = 1.0 if ref > k else 0.0
         else:
-            delta = -1.0 if s < k else 0.0
+            delta = -1.0 if ref < k else 0.0
         return Greeks(delta=delta, gamma=0.0, theta=0.0, vega=0.0, rho=0.0, iv=max(sigma, 0.0))
     d1, d2 = _d1_d2(s, k, t, r, sigma, q)
     pdf_d1 = _norm_pdf(d1)

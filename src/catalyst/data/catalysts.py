@@ -37,8 +37,18 @@ class StaticEconomicCalendar:
         self._dir = Path(calendars_dir)
         self._symbols = list(economic_symbols)
 
+    def _warn_if_uncovered(self, start: date) -> None:
+        """A request predating the shipped calendars silently returned zero
+        macro events for those years (audit D-170: FOMC starts 2018-01-31)."""
+        for name, first in _static_calendar_first_dates(self._dir).items():
+            if start < first:
+                logger.warning("%s coverage starts %s but the run starts %s — "
+                               "earlier macro events are MISSING, not absent",
+                               name, first, start)
+
     def get_catalyst_calendar(self, start: date, end: date) -> list[Catalyst]:
         out: list[Catalyst] = []
+        self._warn_if_uncovered(start)
         with open(self._dir / "cpi.csv") as f:
             for row in csv.DictReader(f):
                 d = date.fromisoformat(row["release_date"])
@@ -65,7 +75,13 @@ class StaticEconomicCalendar:
                                 source="fed-calendar",
                             )
                         )
-        return sorted(out, key=lambda c: c.when)
+        # Same-day CPI + FOMC produce two catalysts per symbol for one
+        # reaction session (4 dates in the shipped calendars, audit D-128):
+        # keep the EARLIER event (CPI 08:30) — it opens the reaction window.
+        dedup: dict[tuple[str, date], Catalyst] = {}
+        for c in sorted(out, key=lambda c: c.when):
+            dedup.setdefault((c.symbol, c.when.date()), c)
+        return sorted(dedup.values(), key=lambda c: c.when)
 
 
 class YFinanceEarnings:
@@ -98,7 +114,13 @@ class YFinanceEarnings:
                            symbol, exc)
             return pd.DataFrame(columns=["when", "eps_estimate", "eps_actual"])
         if raw is None or raw.empty:
-            df = pd.DataFrame(columns=["when", "eps_estimate", "eps_actual"])
+            # Empty is yfinance's most common FAILURE shape (rate limits,
+            # layout drift). Caching it as "no earnings" deletes the symbol's
+            # catalysts from every future backtest (audit D-047) — the exact
+            # class the comment above claims fixed. Serve empty, cache nothing.
+            logger.warning("yfinance returned EMPTY earnings for %s (NOT cached)",
+                           symbol)
+            return pd.DataFrame(columns=["when", "eps_estimate", "eps_actual"])
         else:
             idx = raw.index.tz_convert("America/New_York").tz_localize(None)
             df = pd.DataFrame(
@@ -165,8 +187,13 @@ class FMPEarningsCalendar:
             if symbol not in self._symbols:
                 continue
             d = date.fromisoformat(row["date"])
-            # FMP's stable calendar lacks a BMO/AMC flag: assume after-close of
-            # the stated date (the conservative default for pre-event entries).
+            # FMP's stable calendar lacks a BMO/AMC flag. Stamping 16:00 makes
+            # resolve_reaction_session return D+1 — for a BEFORE-OPEN reporter
+            # that is one day LATE: the "pre-event" entry happens after the
+            # move (audit D-008, lookahead-adjacent). This provider is
+            # therefore DEPRECATED for entry timing; YFinanceEarnings carries
+            # real timestamps and is the wired default. Kept for EPS surprise
+            # data only.
             out.append(
                 Catalyst(
                     symbol=symbol,
@@ -178,6 +205,19 @@ class FMPEarningsCalendar:
                 )
             )
         return sorted(out, key=lambda c: c.when)
+
+
+def _static_calendar_first_dates(cal_dir: Path) -> dict[str, date]:
+    firsts: dict[str, date] = {}
+    for name, col in (("cpi.csv", "release_date"), ("fomc.csv", "decision_date")):
+        try:
+            with open(cal_dir / name) as f:
+                rows = list(csv.DictReader(f))
+            if rows:
+                firsts[name] = min(date.fromisoformat(r[col]) for r in rows)
+        except OSError:
+            pass
+    return firsts
 
 
 class CompositeCatalystProvider:

@@ -64,6 +64,14 @@ def archive(name: str, verdict: str, *, avg_monthly: float | None = None,
 
     # Results travel with the code; a verdict without its artifacts is a rumour.
     src_results = RESULTS_ACTIVE / name
+    # the promotion ledger lives at results/<name>/status.json OUTSIDE the
+    # active tree; leaving it behind kept a stale validated/paper_tested
+    # verdict discoverable under the archived strategy's name (audit D-149)
+    ledger = Path("results") / name / "status.json"
+    if ledger.exists():
+        dest_ledger = RESULTS_ARCHIVE / name / "status.json"
+        dest_ledger.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ledger, dest_ledger)
     metrics: dict = {}
     if src_results.exists():
         _move(src_results, RESULTS_ARCHIVE / name)

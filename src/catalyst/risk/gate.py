@@ -39,14 +39,24 @@ class FixedFractionalGate:
         account: AccountState,
         positions: list[Position],
     ) -> GateDecision:
+        mult = proposal.multiplier
         units = fixed_fractional_units(
-            account.equity, proposal.per_trade_risk_fraction, proposal.unit_max_loss
+            account.equity, proposal.per_trade_risk_fraction,
+            proposal.unit_max_loss, multiplier=mult,
         )
         if units <= 0:
             return GateDecision(0, "risk budget below one unit")
-        cost = proposal.unit_cost * units * 100.0
+        # Cash basis by structure (audit D-147/D-224): a DEBIT consumes its
+        # cost; a CREDIT consumes COLLATERAL (max loss) — negative unit_cost
+        # made every credit trivially "affordable" and the hardcoded 100x
+        # mis-sized equity proposals.
+        per_unit_cash = (proposal.unit_cost if proposal.unit_cost > 0
+                         else proposal.unit_max_loss)
+        if per_unit_cash is None or per_unit_cash != per_unit_cash:
+            return GateDecision(0, "credit structure without max_loss")
+        cost = per_unit_cash * units * mult
         if cost > account.cash:
-            units = int(account.cash // (proposal.unit_cost * 100.0))
+            units = int(account.cash // (per_unit_cash * mult))
             if units <= 0:
                 return GateDecision(0, "insufficient cash")
         return GateDecision(units, "ok")

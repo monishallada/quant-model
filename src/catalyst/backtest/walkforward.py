@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable
 
+from datetime import timedelta
+
 from dateutil.relativedelta import relativedelta
 
 from catalyst.core.config import WalkForwardConfig
@@ -38,7 +40,10 @@ def walk_forward_windows(start: date, end: date, cfg: WalkForwardConfig) -> list
             WalkForwardWindow(
                 train_start=cursor,
                 train_end=train_end,
-                test_start=train_end,
+                # STRICTLY after train_end: consumers slice sessions with
+                # both ends inclusive, so test_start == train_end put the
+                # boundary session in BOTH windows (audit D-027)
+                test_start=train_end + timedelta(days=1),
                 test_end=test_end,
             )
         )

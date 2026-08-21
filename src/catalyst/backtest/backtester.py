@@ -68,6 +68,7 @@ class _OpenTradeState:
     commissions: float = 0.0
     exit_cash_weighted: float = 0.0  # Σ credit_per_unit × qty_closed
     multiplier: float = 100.0        # instrument dollars-per-point (audit LOW)
+    unit_max_loss: float | None = None  # structural cap from the proposal
     qty_closed: int = 0
     exit_reasons: list[str] = field(default_factory=list)
     last_exit_time: datetime | None = None
@@ -99,6 +100,11 @@ class Backtester:
         self._label = label
         hh, mm = cfg.data.snapshot_time.split(":")
         self._snap = time(int(hh), int(mm))
+        #: sessions where a needed chain could not be fetched (audit D-074) —
+        #: silently vanished symbols looked identical to no-catalyst days
+        self.chain_misses = 0
+        #: contracts whose last quote lagged the snapshot >15min (audit D-140)
+        self.stale_quote_contracts = 0
 
     # ------------------------------------------------------------------
 
@@ -114,7 +120,13 @@ class Backtester:
             raise ValueError(f"No trading sessions in {start}..{end}")
 
         # Underlying history once per symbol (signals slice it lookahead-free).
-        symbols = sorted({c.symbol for c in self._catalysts})
+        # Catalyst symbols PLUS any universe a SCHEDULED/DAILY strategy
+        # declares (audit D-019: non-catalyst strategies got no history and
+        # every signal fell back to neutral, silently).
+        symbol_set = {c.symbol for c in self._catalysts}
+        for strat in self._strategies:
+            symbol_set.update(getattr(strat, "universe", ()) or ())
+        symbols = sorted(symbol_set)
         history: dict[str, pd.DataFrame] = {}
         for sym in symbols:
             try:
@@ -140,7 +152,14 @@ class Backtester:
                 logger.info(
                     "progress %s: session %d/%d (%s)", self._label, i + 1, len(sessions), session
                 )
-            at = datetime.combine(session, self._snap)
+            # Early-close sessions close at 13:00; snapshotting 15:45 there
+            # read quotes that never printed (audit D-020: 18 sessions in
+            # 2018-2026). Clamp to 15 minutes before the actual close.
+            from catalyst.core.tradingcal import session_close_time
+            close_t = session_close_time(session)
+            snap_t = self._snap if self._snap <= close_t else (
+                datetime.combine(session, close_t) - pd.Timedelta(minutes=15)).time()
+            at = datetime.combine(session, snap_t)
             chains = self._pull_chains(session, at, broker, catalysts_by_symbol)
             broker.update_market(chains, at)
             self._sweep_settled(broker, open_state, trades, at)
@@ -204,8 +223,11 @@ class Backtester:
         plus expiries any engine declares for an in-play catalyst."""
         needed: dict[str, set[date]] = defaultdict(set)
 
+        from catalyst.core.types import EquityKey
         for pos in broker.get_positions():
             for leg in pos.legs:
+                if isinstance(leg.key, EquityKey):
+                    continue                     # shares have no expiry (D-072)
                 if leg.key.expiry >= session:
                     needed[pos.underlying].add(leg.key.expiry)
 
@@ -213,11 +235,17 @@ class Backtester:
         # so the pipeline asks them what to fetch. opportunities() is deliberately
         # chain-free: it answers "what would you look at today", which must not
         # require paying for a chain to find out.
+        self._session_opps: dict[str, list] = {}
         for strat in self._strategies:
             if strat.cadence is Cadence.CATALYST:
                 continue
             probe = StrategyContext(as_of=at, data=self._data)
-            for opp in strat.opportunities(session, probe):
+            opps = list(strat.opportunities(session, probe))
+            # cached for _process_scheduled_entries: calling opportunities()
+            # twice per session invited state-dependent divergence between
+            # what was fetched and what was traded (audit D-073)
+            self._session_opps[strat.name] = opps
+            for opp in opps:
                 for sym in opp.symbols:
                     available = [e for e in self._data.list_expirations(sym) if e > session]
                     req = strat.required_expiries(opp, available, session)
@@ -234,7 +262,10 @@ class Backtester:
             for catalyst in in_play:
                 # The screener measures implied move on the first expiry that
                 # captures the event — make sure it's in the snapshot.
-                if self._screener is not None and catalyst.when.date() > session:
+                # >= : an AMC reporter's announcement DAY is a valid entry day
+                # whose screener still needs the event-capture expiry
+                # (audit D-021: > excluded every same-day entry)
+                if self._screener is not None and catalyst.when.date() >= session:
                     event_expiries = [
                         e for e in available if e >= resolve_reaction_session(catalyst)
                     ]
@@ -272,9 +303,25 @@ class Backtester:
             if not expiries:
                 continue
             try:
-                chains[sym] = self._data.get_chain(sym, at, expiries=sorted(expiries))
+                chain = self._data.get_chain(sym, at, expiries=sorted(expiries))
+                # quote_timestamp was captured on every contract and read by
+                # NOTHING (audit D-140): halted/aday-old forwarded quotes
+                # marked and filled as fresh. Count and warn; the counter is
+                # engine telemetry the report can surface.
+                stale = sum(
+                    1 for c in chain.contracts
+                    if c.quote_timestamp is not None
+                    and (at - c.quote_timestamp).total_seconds() > 900)
+                if stale:
+                    self.stale_quote_contracts += stale
+                    logger.warning("%s %s: %d/%d contracts quoted >15min "
+                                   "before the snapshot", sym, session, stale,
+                                   len(chain.contracts))
+                chains[sym] = chain
             except DataUnavailableError as exc:
-                logger.debug("No chain for %s on %s: %s", sym, session, exc)
+                self.chain_misses += 1
+                logger.warning("No chain for %s on %s: %s (miss #%d)",
+                               sym, session, exc, self.chain_misses)
         return chains
 
     # ------------------------------------------------------------------
@@ -291,8 +338,18 @@ class Backtester:
     ) -> None:
         for pos in list(broker.get_positions()):
             for action in evaluate_exits(pos, at.date()):
-                qty = max(1, round(pos.qty * action.close_fraction))
-                qty = min(qty, pos.qty)
+                if action.close_fraction >= 1.0:
+                    qty = pos.qty
+                else:
+                    # half-up, not banker's rounding (audit D-172); a scale-out
+                    # that rounds to zero on a 1-unit position closes nothing —
+                    # forcing 1 made "sell a third" mean "sell everything"
+                    qty = min(pos.qty, int(pos.qty * action.close_fraction + 0.5))
+                    if qty == 0:
+                        logger.debug("tp1 fraction %.2f rounds to 0 units on "
+                                     "%d-unit position — skipped",
+                                     action.close_fraction, pos.qty)
+                        continue
                 order = Order(
                     legs=[
                         OrderLeg(
@@ -302,7 +359,8 @@ class Backtester:
                         )
                         for leg in pos.legs
                     ],
-                    limit_price=pos.current_value,
+                    # order-level convention: close cash direction = -value (D-106)
+                    limit_price=-pos.current_value,
                     tag=f"{pos.engine_tag}:{pos.catalyst_ref}",
                     intent=OrderIntent.CLOSE,
                     position_id=pos.position_id,
@@ -314,7 +372,12 @@ class Backtester:
                 state = open_state.get(pos.position_id)
                 if state is not None:
                     state.commissions += result.commission
-                    state.exit_cash_weighted += (result.avg_fill_price or 0.0) * result.filled_qty
+                    if result.avg_fill_price is None:
+                        raise RuntimeError(
+                            f"broker returned FILLED with no fill price for "
+                            f"{pos.position_id} — refusing to book a $0 exit "
+                            "(audit D-075)")
+                    state.exit_cash_weighted += result.avg_fill_price * result.filled_qty
                     state.qty_closed += result.filled_qty
                     state.exit_reasons.append(action.reason)
                     state.last_exit_time = at
@@ -332,6 +395,19 @@ class Backtester:
         at: datetime,
     ) -> None:
         """Fold positions the broker settled at expiry into trade records."""
+        # Partial (per-leg) settlements first: the position LIVES ON with its
+        # remaining legs, but the settled legs' cash must reach the record now
+        # (P0 fix for audit D-006). Folding into exit_cash_weighted without
+        # closing units keeps total P&L exact: final exit adds its own credit.
+        for pid, per_unit in getattr(broker, "partial_settlements", []):
+            state = open_state.get(pid)
+            if state is not None:
+                remaining = state.max_qty - state.qty_closed
+                state.exit_cash_weighted += per_unit * remaining
+                state.exit_reasons.append("leg_expired_settled")
+        if getattr(broker, "partial_settlements", None):
+            broker.partial_settlements.clear()
+
         live_ids = {p.position_id for p in broker.get_positions()}
         # AUDIT MEDIUM: a deep-ITM settle that paid $6,000 into cash was
         # recorded as pnl=-$1.30 (exit approximated as entry). The broker now
@@ -351,6 +427,10 @@ class Backtester:
                 state.qty_closed += remaining
                 trades.append(self._to_record(pid, state))
             else:
+                logger.error("position %s settled with NO settlement telemetry "
+                             "— exit approximated at entry (the old deep-ITM "
+                             "-$1.30 shape, audit D-173/175); investigate",
+                             pid)
                 trades.append(self._to_record(pid, state, settled_remainder=True))
 
     def _finalize_open(
@@ -365,6 +445,12 @@ class Backtester:
             if state is None:
                 continue
             remaining = pos.qty
+            # commission on the synthetic close (audit D-174): marking out at
+            # mid AND commission-free understated round-trip cost for every
+            # position open at segment end
+            contracts = sum(leg.qty for leg in pos.legs) * remaining
+            state.commissions += (
+                self._cfg.execution.commissions.per_contract * contracts)
             state.exit_cash_weighted += pos.current_value * remaining
             state.qty_closed += remaining
             state.exit_reasons.append("end_of_backtest")
@@ -400,6 +486,7 @@ class Backtester:
             pnl=pnl,
             exit_reason="+".join(state.exit_reasons) if state.exit_reasons else "unknown",
             max_qty=state.max_qty,
+            unit_max_loss=state.unit_max_loss,
         )
 
     # ------------------------------------------------------------------
@@ -446,6 +533,9 @@ class Backtester:
         # and never re-enter a bet that already closed.
         already = {(s.engine, s.catalyst_ref) for s in open_state.values()}
         already |= {(t.engine, t.catalyst_ref) for t in trades}
+        # co-occurring catalysts (CPI + FOMC, or macro + earnings) share one
+        # reaction session; two refs must not double a position (audit D-078)
+        session_taken = {(s.engine, s.underlying) for s in open_state.values()}
 
         for sym, cat_list in catalysts_by_symbol.items():
             chain = chains.get(sym)
@@ -465,6 +555,11 @@ class Backtester:
                 for strat in self._strategies:
                     if (strat.name, catalyst.ref) in already:
                         continue
+                    if (strat.name, sym) in session_taken:
+                        logger.info("skip %s %s: position already open on this "
+                                    "symbol this session (audit D-078)",
+                                    strat.name, catalyst.ref)
+                        continue
                     # plan(), never evaluate() directly: the pipeline calls the
                     # strategy, so there is no path for a strategy to reach the
                     # broker, the risk layer or the cost model.
@@ -473,6 +568,7 @@ class Backtester:
                         continue
                     self._enter(broker, proposal, open_state, at)
                     already.add((strat.name, catalyst.ref))
+                    session_taken.add((strat.name, sym))
 
     def _process_scheduled_entries(
         self,
@@ -492,10 +588,10 @@ class Backtester:
         for strat in self._strategies:
             if strat.cadence is Cadence.CATALYST:
                 continue
-            probe = StrategyContext(as_of=at, data=self._data,
-                                    history=self._pit_history(history, session),
-                                    chains=chains)
-            for opp in strat.opportunities(session, probe):
+            # ONE opportunities() call per session (audit D-073): the cache
+            # from _pull_chains is the same chain-free probe contract, so the
+            # set fetched and the set traded cannot diverge.
+            for opp in getattr(self, "_session_opps", {}).get(strat.name, []):
                 sym = opp.symbol
                 if sym not in chains:
                     continue
@@ -571,15 +667,28 @@ class Backtester:
         if result.status is not OrderStatus.FILLED:
             logger.debug("Entry rejected (%s): %s", proposal.engine, result.message)
             return
-        position_id = f"pos-{result.order_id}"
+        # the broker NAMES the position (audit D-080: reconstructing its
+        # private scheme silently desynced records the day the scheme moved)
+        position_id = result.position_id or f"pos-{result.order_id}"
+        # is-not-None, never falsy-or: a legitimate $0.00-net fill was being
+        # replaced by the pre-fill estimate (audit D-081)
+        fill = (result.avg_fill_price if result.avg_fill_price is not None
+                else proposal.unit_cost)
+        unit_max_loss = getattr(proposal, "unit_max_loss", None)
+        if unit_max_loss is not None and fill == fill:
+            # reconcile the structural cap with the ACTUAL fill: a worse
+            # credit/debit than proposed raises the real worst case
+            # (audit D-079); same adjustment covers debit and credit.
+            unit_max_loss = unit_max_loss + (fill - proposal.unit_cost)
         open_state[position_id] = _OpenTradeState(
             engine=proposal.engine,
             catalyst_ref=proposal.catalyst_ref,
             underlying=proposal.legs[0].key.underlying,
             direction=proposal.direction,
             multiplier=proposal.multiplier,
+            unit_max_loss=unit_max_loss,
             entry_time=at,
-            entry_price=result.avg_fill_price or proposal.unit_cost,
+            entry_price=fill,
             max_qty=result.filled_qty,
             commissions=result.commission,
         )

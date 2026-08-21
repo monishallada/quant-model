@@ -30,12 +30,19 @@ INK, ACC, RED, GRN, GRY = "#14171D", "#3B5C8A", "#A93A2C", "#1A7A57", "#767E8C"
 
 
 def find_report(name: str) -> Path | None:
-    for base in (Path("results/active"), Path("results/archive"),
-                 Path("results/archive/pre_framework")):
-        p = base / name / "report.json"
-        if p.exists():
-            return p
-    return None
+    """NEWEST report wins, and the choice is printed: fixed precedence
+    silently rendered a stale active/ report over a fresher archived one
+    (audit D-155)."""
+    candidates = [base / name / "report.json"
+                  for base in (Path("results/active"), Path("results/archive"),
+                               Path("results/archive/pre_framework"))]
+    existing = [p for p in candidates if p.exists()]
+    if not existing:
+        return None
+    chosen = max(existing, key=lambda p: p.stat().st_mtime)
+    print(f"report source: {chosen} "
+          f"({len(existing)} candidate(s); newest mtime chosen)")
+    return chosen
 
 
 def render(name: str, report: dict, out: Path) -> Path:

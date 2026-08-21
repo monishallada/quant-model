@@ -26,7 +26,11 @@ def test_random_combinations_count_and_membership() -> None:
         parameters={"a.x": [1, 2, 3], "b.y": [0.1, 0.2]},
     )
     combos = list(iter_combinations(cfg))
-    assert len(combos) == 25
+    # dedup since audit D-196: the space holds 3x2=6 distinct combos, so 25
+    # requested samples yield each exactly once
+    assert len(combos) == 6
+    keys = {tuple(sorted((k, str(v)) for k, v in c.items())) for c in combos}
+    assert len(keys) == 6
     assert all(c["a.x"] in (1, 2, 3) and c["b.y"] in (0.1, 0.2) for c in combos)
 
 
@@ -38,7 +42,10 @@ def test_walk_forward_windows_roll() -> None:
     assert len(windows) == 12
     first = windows[0]
     assert first.train_start == date(2018, 1, 1)
-    assert first.train_end == date(2020, 1, 1) == first.test_start
+    assert first.train_end == date(2020, 1, 1)
+    # boundary EXCLUSIVE since audit D-027: the shared session
+    # no longer appears in both windows
+    assert first.test_start == date(2020, 1, 2)
     assert first.test_end == date(2020, 7, 1)
     # No window may peek past the end.
     assert all(w.test_end <= date(2026, 1, 1) for w in windows)

@@ -335,6 +335,90 @@ caught instantly.
    call−put IV spread, IV−RV) from 8 years of cached chains, and universe
    expansion from 130 to ~500 names (√breadth should lift IR ~2×).
 
+## v14 short-VRP verdict (2026-08-20) — the seller's side dies the same death
+
+Defined-risk iron condors sold into gated catalyst premium (IV rank >=80th pctile,
+IV/RV >=1.3, implied >=1.1x hist-8 reaction move), 2018-2026, 9 configurations.
+Gated spec config: -0.12%/mo real, -0.03%/mo zero, test N=16. Ungated baseline
+(N=171): -0.85%/mo real, -0.17%/mo zero, P(profitable)=0.0% [CI -454,-237].
+
+THE SCALE-FREE NUMBER: friction is 55-66% of collected credit at EVERY strike
+distance (0.10D 61%, 0.16D 55%, 0.25D 66%). A short-vol structure must beat that
+to profit; the variance premium overprices by a few percent. Off by an order of
+magnitude — no gate, stop, or strike fixes it.
+
+Strike-delta dose response (the one knob the gate grid can't reach), gross $/trade:
+0.05D +51 (N=14) / 0.07D +40 / 0.10D +66 / 0.16D -77 / 0.25D -213. Monotone
+r=-0.96, genuine interior optimum at 0.10D — and net is NEGATIVE at all five.
+The apparent improvement below 0.10D is inactivity: N collapses as the
+minimum-credit gate rejects thin premium.
+
+Fill frontier at the 0.10D optimum (crossing-only rows exclude slippage/commissions):
++$66/trade at mid, +$21 at 20%, +$5 at 40% (PF 1.03), -$80 at 60%+slippage.
+**BREAK-EVEN ~40% of the quoted spread** — and that is generous, since the
+crossing rows carry no slippage or commissions.
+
+RULE (now measured from BOTH sides): event variance premium at retail access is
+priced close to fair. Buyers lose (A/B -0.45/-2.25%/mo; v10 PF 0.96 frictionless),
+sellers lose (v14), and the spread consumes both. Any revival of ANY VRP variant
+requires a MEASURED effective/quoted execution ratio at the actual broker.
+CONVERGENT EVIDENCE: v12 index 0DTE broke even at ~45% of quoted spread; v14
+single-name condors break even at ~40%. Two instrument classes, two structures,
+same threshold band — this is a property of RETAIL OPTIONS EXECUTION, not of
+either strategy. The production cost model assumes 60%, which is why every
+version lands under water. Never assumed, never another backtest.
+
+RULE (statistics): a 4-trade/year design cannot be validated on 8.6 years. Every
+gated cell's gross edge was insignificant (t 0.71-1.01, CIs straddling zero); only
+the monotone dose response across the sweep carried evidence. When N is structurally
+capped by the gates, report the CI and the shape — never a point estimate's sign.
+
+RULE (test coverage): three gates shipped as silent no-ops (IV-rank 0-100 vs 0-1
+threshold; event-expiry IV vs tenor-matched 30d in the IV/RV ratio; announcement
+date vs reaction session for historical moves) and a lookahead leak shipped in the
+IV provider (`series.index <= day` on 15:59 EOD greeks read at the 15:45 decision).
+All four were in code paths with NO test coverage. A strategy's evaluate() passing
+path and every provider's point-in-time contract must be tested before a campaign
+runs, or the first "result" measures something other than the strategy.
+
+## v15 audit + full remediation (2026-08-21) — the deployment path was fiction
+
+A 22-finder adversarial audit (every CRITICAL/HIGH independently re-verified:
+104/106 confirmed) counted 228 distinct defects: 17 CRITICAL / 53 HIGH /
+99 MEDIUM / 59 LOW, 92% failing SILENTLY. All were remediated in one pass
+(53 files, +1,919/-588; suite 532 -> 645 tests, all green).
+
+THE HEADLINE FINDING: backtest and live were different programs. The
+"only road to a broker" could not construct a single valid order (5-6
+nonexistent model fields -> ValidationError on every submit/close); paper mode
+had NO trading loop yet granted paper_tested on connection; the Alpaca adapter
+sent every multi-leg CLOSE as an OPEN and abs()'d away the credit/debit sign;
+and paper/live inherited the research-era risk limits (5% floor / 95% heat)
+while backtests validated under 40%/25% — 8x the deployment, silently.
+
+RULE (now enforced, not asserted): every architectural claim in a docstring
+must name an EXISTING test that enforces it. The audit found six load-bearing
+claims that were false (nonexistent enforcement test, unwired staleness guard,
+dead kill-switch config, "identical risk config across modes", "mandatory"
+zero-cost twin, vollib-precision greeks). All six are now true AND tested:
+only-path AST test, risk-parity test, mode/config binding test, round-trip
+paper evidence, per-leg settlement tests, textbook greeks references.
+
+RULE (cache): any fetch that can fail transiently must be structurally unable
+to cache its failure. Five sibling paths of the v13 fix still cached failures
+(daily bars, in-progress sessions, yfinance empties, HTTP 472, partial IV
+series). Atomic writes + corruption quarantine are now the cache's contract.
+
+RULE (metrics): a metric that cannot represent an outcome must fail loudly,
+never report the SAFEST value. avg_monthly returned 0.0 (flat!) for a
+bankrupt curve; P(ruin) returned 0.0 for corrupt input; both now scream.
+
+Prior-results impact after remediation: v14/v12/v5-v7 verdicts robust (margins
+dwarf all defects); Engine D calendar and v2 pairs-options LOSS MAGNITUDES
+unreliable (per-leg settlement bug liquidated live back legs at intrinsic —
+both were rejects, direction stands); every paper-mode observation ever
+recorded is void (the mode never traded).
+
 ## Campaign index
 
 | Campaign | Result (avg monthly) | Verdict | Code | Report |
@@ -348,6 +432,7 @@ caught instantly.
 | v6 Tournament Engine | −3.89%/mo standalone | Model said P(10x)=31%, real chains 0% | `catalyst/tournament/` | tournament verdict |
 | v7 Combined Allocator | +2.49%/mo (concentration-flagged) | Archived | `catalyst/allocator/` | v7 campaign |
 | v8 Index VRP | +0.07%/mo (test −0.07%) | Archived — break-even | `catalyst/index_vrp/` | v8 campaign |
+| **v14 short-VRP condors** | **−0.12%/mo real (−0.03% zero)** | **Archived — friction is 60% of credit; break-even needs ~40% spread capture** | `catalyst/strategies/archive/short_vrp.py` | `docs/v14_final_report.md` |
 | **v9 Long calls/puts** | **+0.98%/mo calls-only; −1.85% signal-directed** | **ACTIVE — first real right tail (P(10x)=7.3% TSLA), but no alpha** | `catalyst/persymbol/long_options.py` | this campaign |
 
 ## Re-running an archived campaign

@@ -34,7 +34,7 @@ from catalyst.core.types import (
 )
 from catalyst.data.black_scholes import bs_greeks, implied_vol
 from catalyst.data.cache import ParquetCache
-from catalyst.data.thetadata_client import ThetaDataClient
+from catalyst.data.thetadata_client import ThetaDataClient, ThetaDataDeadSession
 
 logger = logging.getLogger(__name__)
 
@@ -90,12 +90,19 @@ class ThetaDataHistorical(DataSource):
             for f in as_completed(futures):
                 try:
                     f.result()
+                except ThetaDataDeadSession:
+                    # every remaining job WILL fail: abort the warm-up now
+                    # instead of hammering a dead terminal (audit D-217)
+                    raise
                 except Exception as exc:  # noqa: BLE001 — logged; serial path re-raises
-                    logger.debug("Prefetch job failed (will retry serially): %s", exc)
+                    logger.warning("Prefetch job failed (will retry serially): %s", exc)
 
     def _expirations(self, symbol: str) -> list[date]:
+        # Year-scoped key (audit D-136): the listing grows as new expiries
+        # list; an eternal symbol-only key served an old listing forever.
         df = self._cached(
-            "expirations", symbol, "/v3/option/list/expirations", {"symbol": symbol}
+            "expirations", f"{symbol}_{date.today():%Y}",
+            "/v3/option/list/expirations", {"symbol": symbol}
         )
         if df.empty:
             return []
@@ -107,6 +114,10 @@ class ThetaDataHistorical(DataSource):
         tstr = snap.strftime("%H:%M:%S") + ".000"
         return (
             "greeks_fo",
+            # Key is minute-resolution BY CONTRACT (audit D-137): the system
+            # only ever snapshots at :00 seconds; the guard below turns the
+            # theoretical sub-minute collision into a loud error instead of
+            # invalidating the entire warm cache with a new key format.
             f"{symbol}_{expiry:%Y%m%d}_{day:%Y%m%d}_{snap:%H%M}",
             "/v3/option/history/greeks/first_order",
             {
@@ -172,6 +183,14 @@ class ThetaDataHistorical(DataSource):
         requests per expiration) for callers that don't gate on them."""
         day = at.date()
         snap = at.time()
+
+        if snap.second or snap.microsecond:
+
+            raise ValueError(
+
+                f"sub-minute snapshot {snap} unsupported: cache keys are "
+
+                "minute-resolution (audit D-137)")
         # Same-day expiries are valid: expiry-day liquidation (e.g. the pairs
         # strategy's 14:00 stop) needs quotes on options expiring today.
         if expiries is not None:
@@ -203,6 +222,10 @@ class ThetaDataHistorical(DataSource):
         for expiry in expiries:
             g = self._greeks_frame(symbol, expiry, day, snap)
             if g.empty:
+                # Loud: a silently skipped expiry looks identical to "no
+                # strikes listed" and starved chains downstream (audit D-138).
+                logger.warning("empty greeks frame for %s %s @ %s — expiry "
+                               "skipped in this chain", symbol, expiry, day)
                 continue
             # One row per contract at the snapshot (dedupe defensively).
             g = g.drop_duplicates(subset=["strike", "right"], keep="first")
@@ -240,8 +263,16 @@ class ThetaDataHistorical(DataSource):
                 timestamps,
             )
             for strike, right_s, bid, ask, upx, delta, theta, vega, rho, iv, ts in rows:
+                # NaN quotes become an explicitly UNQUOTABLE contract
+                # (bid=0/ask=0), which every downstream guard rejects; the old
+                # coercion of NaN->0.0 also let ask=0 "quotes" through where
+                # only bid was NaN (audit D-139). Crossed quotes are dropped
+                # here — the cost model refuses them anyway, and emitting them
+                # only creates mid-distorted screener stats (D-043).
                 bid = bid if bid == bid else 0.0  # NaN-safe without pd.isna calls
                 ask = ask if ask == ask else 0.0
+                if bid > ask > 0:
+                    continue
                 if upx > 0:
                     underlying_prices.append(upx)
                 greeks = self._scalar_greeks(
@@ -294,7 +325,11 @@ class ThetaDataHistorical(DataSource):
         bid: float,
         ask: float,
     ) -> Greeks | None:
-        if iv == iv and iv > 0:  # NaN-safe "served IV present"
+        # Served greeks are used only when EVERY consumed field is finite:
+        # a NaN delta reaching nearest_delta() made strike selection
+        # nondeterministic while looking perfectly normal (audit D-056).
+        if (iv == iv and iv > 0 and delta == delta
+                and theta == theta and vega == vega):
             return Greeks(
                 delta=delta,
                 theta=theta,
@@ -307,6 +342,10 @@ class ThetaDataHistorical(DataSource):
         t = (expiry - day).days / 365.0
         if mid <= 0 or t <= 0 or underlying_price <= 0:
             return None
+        # Model limitation (audit D-141): European BS with q=0 and the single
+        # configured r for all years — American early-exercise premium and
+        # dividends are unmodeled, so fallback IV on deep-ITM dividend names
+        # skews high. Served greeks are preferred wherever present.
         solved = implied_vol(
             mid, underlying_price, strike, t, _RIGHT_MAP[right_s], r=self._cfg.risk_free_rate
         )

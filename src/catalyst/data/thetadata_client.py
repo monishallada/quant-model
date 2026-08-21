@@ -19,7 +19,6 @@ from catalyst.core.config import ThetaDataConfig
 logger = logging.getLogger(__name__)
 
 # ThetaData "no data for this request" status (inherited from v2 conventions).
-_NO_DATA_STATUSES = {472}
 
 
 class ThetaDataDeadSession(RuntimeError):
@@ -59,7 +58,11 @@ class ThetaDataClient:
                 )
                 time.sleep(self._cfg.reconnect_wait_seconds)
                 continue
-            except (httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            except (httpx.ReadTimeout, httpx.ReadError, httpx.WriteError,
+                    httpx.WriteTimeout, httpx.PoolTimeout,
+                    httpx.RemoteProtocolError) as exc:
+                # ReadError is what a terminal RESTART actually raises
+                # mid-response (audit D-135) — it must retry, not crash.
                 last_error = exc
                 backoff = self._cfg.retry_backoff_seconds * (2**attempt)
                 logger.warning("ThetaData request failed (%s); retrying in %.1fs", exc, backoff)
@@ -69,9 +72,27 @@ class ThetaDataClient:
             if resp.status_code == 200:
                 text = resp.text
                 if not text.strip():
+                    # 200-with-empty-body from a warming terminal is transient
+                    # (audit D-054): retry before believing "no data".
+                    if attempt < self._cfg.max_retries:
+                        last_error = ThetaDataError("200 with empty body")
+                        backoff = self._cfg.retry_backoff_seconds * (2**attempt)
+                        logger.warning("ThetaData %s -> empty body; retrying "
+                                       "in %.1fs", path, backoff)
+                        time.sleep(backoff)
+                        continue
                     return pd.DataFrame()
                 return pd.read_csv(io.StringIO(text))
-            if resp.status_code in _NO_DATA_STATUSES:
+            if resp.status_code == 472:
+                # "no data" from a terminal that may still be connecting —
+                # observed to flip to real data on retry (audit D-054).
+                if attempt < self._cfg.max_retries:
+                    last_error = ThetaDataError("HTTP 472")
+                    backoff = self._cfg.retry_backoff_seconds * (2**attempt)
+                    logger.warning("ThetaData %s -> 472; retrying in %.1fs",
+                                   path, backoff)
+                    time.sleep(backoff)
+                    continue
                 return pd.DataFrame()
             if resp.status_code == 478:
                 # Dead terminal session: EVERY request will fail until the

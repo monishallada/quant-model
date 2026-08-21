@@ -26,7 +26,13 @@ def fixed_fractional_units(
     1 for shares). Returns 0 when even one unit exceeds the risk budget — the
     trade is skipped, never up-sized.
     """
-    if equity <= 0 or unit_max_loss <= 0:
+    # NaN compares False against everything, so 'unit_max_loss <= 0' let NaN
+    # flow into floor() and crash mid-session; a zero/negative multiplier is a
+    # caller bug that must not size anything (audit D-226).
+    if (equity != equity or unit_max_loss != unit_max_loss
+            or multiplier != multiplier):
+        return 0
+    if equity <= 0 or unit_max_loss <= 0 or multiplier <= 0:
         return 0
     budget = equity * per_trade_risk_fraction
     return max(math.floor(budget / (unit_max_loss * multiplier)), 0)

@@ -42,6 +42,8 @@ import httpx
 from catalyst.core.interfaces import Broker
 from catalyst.core.symbology import parse_osi, to_schwab_symbol
 from catalyst.core.types import (
+    EquityKey,
+    InstrumentKey,
     AccountState,
     Direction,
     ExitRules,
@@ -164,11 +166,18 @@ class SchwabBroker(Broker):
 
     def build_payload(self, order: Order) -> dict[str, Any]:
         """Schwab order JSON. Public so it can be unit-tested with no network."""
+        def _instrument(key) -> dict[str, str]:
+            # EquityKey legs are legal orders (SimulatedBroker supports them);
+            # hardcoding OPTION crashed on them via to_schwab_symbol (D-033).
+            if isinstance(key, EquityKey):
+                return {"symbol": key.underlying, "assetType": "EQUITY"}
+            return {"symbol": to_schwab_symbol(key), "assetType": "OPTION"}
+
         legs = [
             {
                 "instruction": self._instruction(leg.side, order.intent),
                 "quantity": leg.qty,
-                "instrument": {"symbol": to_schwab_symbol(leg.key), "assetType": "OPTION"},
+                "instrument": _instrument(leg.key),
             }
             for leg in order.legs
         ]
@@ -191,10 +200,13 @@ class SchwabBroker(Broker):
         if not order.legs:
             return OrderResult(order_id="", status=OrderStatus.REJECTED, message="no legs")
         acct = self._creds.account_hash
+        # Token acquisition failures are AUTH problems, not order rejections;
+        # conflating them hid expiring refresh tokens as "rejected" (D-107).
+        token = self._ensure_token()
         try:
             resp = self._client.request(
                 "POST", f"/accounts/{acct}/orders",
-                headers={"Authorization": f"Bearer {self._ensure_token()}"},
+                headers={"Authorization": f"Bearer {token}"},
                 json=self.build_payload(order))
         except SchwabError as e:
             return OrderResult(order_id="", status=OrderStatus.REJECTED, message=str(e))
@@ -203,17 +215,51 @@ class SchwabBroker(Broker):
                                message=resp.text[:300])
         # Schwab returns the new order id in the Location header, not the body.
         order_id = resp.headers.get("Location", "").rstrip("/").rsplit("/", 1)[-1]
+        if not order_id:
+            # An accepted order we cannot address is unmanageable: no cancel,
+            # no status poll. Surface it loudly instead of ACCEPTED-with-empty-id
+            # (audit D-108).
+            return OrderResult(order_id="", status=OrderStatus.REJECTED,
+                               message="order POST accepted but no Location header; "
+                                       "order may be live — verify at broker NOW")
         return OrderResult(order_id=order_id, status=OrderStatus.ACCEPTED)
 
     def modify_order(self, order_id: str, changes: dict[str, Any]) -> OrderResult:
+        """Schwab replace requires a COMPLETE replacement order and returns the
+        NEW order id in the Location header; a raw delta is invalid and the old
+        id is dead after success (audit D-034). ``changes`` must therefore be a
+        full order payload (e.g. from build_payload)."""
+        required = {"orderType", "orderLegCollection"}
+        if not required.issubset(changes):
+            return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
+                               message="replace requires a complete order payload "
+                                       f"(missing {sorted(required - set(changes))})")
         acct = self._creds.account_hash
-        self._req("PUT", f"/accounts/{acct}/orders/{order_id}", json=changes)
-        return OrderResult(order_id=order_id, status=OrderStatus.ACCEPTED)
+        try:
+            resp = self._client.request(
+                "PUT", f"/accounts/{acct}/orders/{order_id}",
+                headers={"Authorization": f"Bearer {self._ensure_token()}"},
+                json=changes)
+        except SchwabError as e:
+            return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
+                               message=str(e))
+        if resp.status_code >= 400:
+            return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
+                               message=resp.text[:300])
+        new_id = resp.headers.get("Location", "").rstrip("/").rsplit("/", 1)[-1]
+        if not new_id:
+            return OrderResult(order_id=order_id, status=OrderStatus.REJECTED,
+                               message="replace accepted but no new order id in "
+                                       "Location header — verify manually")
+        return OrderResult(order_id=new_id, status=OrderStatus.ACCEPTED,
+                           message=f"replaced {order_id} -> {new_id}")
 
     def cancel_order(self, order_id: str) -> OrderResult:
+        """Cancel is asynchronous: report requested, not done."""
         acct = self._creds.account_hash
         self._req("DELETE", f"/accounts/{acct}/orders/{order_id}")
-        return OrderResult(order_id=order_id, status=OrderStatus.CANCELED)
+        return OrderResult(order_id=order_id, status=OrderStatus.ACCEPTED,
+                           message="cancel requested (async — re-poll for terminal state)")
 
     def get_positions(self) -> list[Position]:
         acct = self._creds.account_hash
@@ -221,17 +267,31 @@ class SchwabBroker(Broker):
         out: list[Position] = []
         for p in data.get("securitiesAccount", {}).get("positions", []):
             inst = p.get("instrument", {})
-            if inst.get("assetType") != "OPTION":
-                continue
-            try:
-                key = parse_osi(inst.get("symbol", ""))
-            except Exception:
-                continue
+            asset_type = inst.get("assetType", "")
+            symbol = str(inst.get("symbol", ""))
+            if asset_type == "OPTION":
+                try:
+                    key: InstrumentKey = parse_osi(symbol)
+                except ValueError as e:
+                    # Silently dropping a position hides real exposure from the
+                    # risk layer (audit D-035): refuse to reconcile partially.
+                    raise SchwabError(
+                        f"unparseable option position symbol {symbol!r}: {e} — "
+                        "refusing to reconcile with an incomplete book") from e
+                mult = 100.0
+            elif asset_type in ("EQUITY", "COLLECTIVE_INVESTMENT"):
+                key = EquityKey(underlying=symbol)
+                mult = 1.0
+            else:
+                continue  # cash sweeps / fixed income are not tradeable state here
             long_qty = float(p.get("longQuantity", 0) or 0)
             short_qty = float(p.get("shortQuantity", 0) or 0)
             qty = int(long_qty - short_qty)
+            if qty == 0:
+                continue
+            market_value = float(p.get("marketValue", 0) or 0)
             out.append(Position(
-                position_id=inst.get("symbol", ""),
+                position_id=symbol,
                 legs=[PositionLeg(key=key,
                                   side=Side.BUY if qty > 0 else Side.SELL, qty=1)],
                 qty=abs(qty),
@@ -240,17 +300,32 @@ class SchwabBroker(Broker):
                 engine_tag="broker",
                 direction=Direction.NEUTRAL,
                 exit_rules=ExitRules(),
-                current_value=float(p.get("marketValue", 0) or 0)))
+                # marketValue is TOTAL dollars; current_value is per-unit
+                # per-share (audit D-036).
+                current_value=market_value / (abs(qty) * mult)))
         return out
 
     def get_account(self) -> AccountState:
         acct = self._creds.account_hash
         data = self._req("GET", f"/accounts/{acct}")
         bal = data.get("securitiesAccount", {}).get("currentBalances", {})
+
+        def _first(*names: str) -> float:
+            # Margin and cash accounts expose different field names; missing
+            # ones must not silently coalesce to $0 (audit D-110).
+            for n in names:
+                v = bal.get(n)
+                if v is not None:
+                    return float(v)
+            raise SchwabError(
+                f"none of {names} present in currentBalances {sorted(bal)} — "
+                "refusing to report a fabricated $0 balance")
+
         return AccountState(
-            equity=float(bal.get("liquidationValue", 0) or 0),
-            cash=float(bal.get("cashBalance", 0) or 0),
-            buying_power=float(bal.get("buyingPower", 0) or 0),
+            equity=_first("liquidationValue"),
+            cash=_first("cashBalance", "cashAvailableForTrading", "totalCash"),
+            buying_power=_first("buyingPower", "cashAvailableForTrading",
+                                "availableFunds"),
             timestamp=datetime.now(UTC))
 
     def preflight(self) -> dict[str, Any]:

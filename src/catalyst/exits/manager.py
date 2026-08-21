@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from catalyst.core.types import OptionRight, Position
+from catalyst.core.types import EquityKey, OptionRight, Position
 from catalyst.core.tradingcal import add_trading_days, trading_days_between
 
 
@@ -35,6 +35,8 @@ def _spread_width(position: Position) -> float | None:
     if len(position.legs) != 2:
         return None
     a, b = position.legs
+    if isinstance(a.key, EquityKey) or isinstance(b.key, EquityKey):
+        return None  # shares have no expiry/right/strike (audit D-060)
     if a.key.expiry != b.key.expiry or a.key.right != b.key.right:
         return None
     if a.qty != 1 or b.qty != 1 or a.side == b.side:
@@ -48,10 +50,14 @@ def evaluate_exits(position: Position, today: date) -> list[ExitAction]:
     rules = position.exit_rules
     pid = position.position_id
 
-    # 1. Expiry buffer (trading days).
-    nearest_expiry = min(leg.key.expiry for leg in position.legs)
-    if today >= add_trading_days(nearest_expiry, -rules.close_before_expiry_days):
-        return [ExitAction(pid, 1.0, "expiry_buffer")]
+    # 1. Expiry buffer (trading days). Equity legs have no expiry — an
+    # all-shares position skips this rule instead of crashing (audit D-060).
+    option_expiries = [leg.key.expiry for leg in position.legs
+                       if not isinstance(leg.key, EquityKey)]
+    if option_expiries:
+        nearest_expiry = min(option_expiries)
+        if today >= add_trading_days(nearest_expiry, -rules.close_before_expiry_days):
+            return [ExitAction(pid, 1.0, "expiry_buffer")]
 
     # 2. Hard exit date (catalyst time stop / pre-catalyst exit).
     if rules.hard_exit_date is not None and today >= rules.hard_exit_date:
@@ -114,3 +120,44 @@ def evaluate_exits(position: Position, today: date) -> list[ExitAction]:
             return [ExitAction(pid, 1.0, "trail_stop")]
 
     return []
+
+
+@dataclass(frozen=True)
+class IntradayExit:
+    reason: str
+
+
+def evaluate_intraday_exits(position: Position, entry_ts, now) -> IntradayExit | None:
+    """Minute-resolution exit rules — moved here VERBATIM from the intraday
+    engine so ONE module interprets every ExitRules field (audit D-091: the
+    engine carried a second, private interpreter that could drift).
+
+    Dead-zone fixes folded in (audit D-092/D-186): a debit position marked at
+    exactly 0 (or negative) is at max loss and MUST trip a configured stop;
+    the old ``current_value > 0`` gate silently disabled it at the worst mark.
+    """
+    rules = position.exit_rules
+    if rules.close_by_time is not None and now.time() >= rules.close_by_time:
+        return IntradayExit("close_by_time")
+    if (rules.max_hold_minutes is not None
+            and (now - entry_ts).total_seconds() >= rules.max_hold_minutes * 60):
+        return IntradayExit("max_hold_minutes")
+    if rules.use_stops and rules.stop_loss_pct is not None:
+        if position.entry_price > 0:
+            value = position.current_value
+            if value <= 0:
+                return IntradayExit("stop_loss")     # at/below total loss (D-092)
+            if value / position.entry_price - 1.0 <= rules.stop_loss_pct:
+                return IntradayExit("stop_loss")
+        elif (abs(rules.stop_loss_pct) > 1.0 and position.entry_price < 0
+              and position.current_value <= position.entry_price * abs(rules.stop_loss_pct)):
+            # CREDIT structures: liability (-mark) reached |pct| x credit
+            return IntradayExit("credit_stop")
+    if (rules.use_stops and rules.trail_stop_pct is not None
+            and position.high_water_value > 0 and position.current_value
+            is not None):
+        value = position.current_value
+        if value <= 0 or value / position.high_water_value - 1.0 <= -abs(rules.trail_stop_pct):
+            if position.entry_price > 0:             # trail is debit-only
+                return IntradayExit("trail_stop")
+    return None

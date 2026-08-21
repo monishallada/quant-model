@@ -24,8 +24,15 @@ def probability_of_ruin(
     ``ruin_threshold_fraction`` of starting equity."""
     values = daily_returns.to_numpy()
     n = len(values)
-    if n < 2 or not np.isfinite(values).all():
+    if n < 2:
         return 0.0
+    if not np.isfinite(values).all():
+        # NaN/inf in the return series is corrupted input; answering "0% ruin
+        # probability" — the SAFEST possible value — for a curve too broken to
+        # simulate is the exact silent-optimism the audit hunts (D-025).
+        raise ValueError(
+            "probability_of_ruin: daily returns contain non-finite values — "
+            "the equity curve is corrupted; refusing to report 0.0")
     block = max(1, min(cfg.resample_block_size, n))
     rng = np.random.default_rng(seed)
     n_blocks = int(np.ceil(n / block))

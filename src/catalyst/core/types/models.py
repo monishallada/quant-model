@@ -173,7 +173,12 @@ class Catalyst(_Model):
     when: datetime  # event datetime (ET); earnings BMO/AMC resolved to session edges
     source: str
     expected_move: float | None = None  # ATM-straddle implied move (fraction), when known
-    # Earnings-specific (Engine C consumes the surprise sign — measured, not predicted):
+    # Earnings-specific. POINT-IN-TIME WARNING (audit D-048/D-129): these are
+    # scraped POST-HOC — eps_actual is unknowable before the reaction session,
+    # and vendor calendars reflect CURRENT knowledge (reschedules overwritten).
+    # A strategy reading eps_actual at or before entry is lookahead by
+    # construction; only post-reaction consumers (e.g. PEAD-style engines
+    # acting AFTER the print) may touch it.
     eps_actual: float | None = None
     eps_estimate: float | None = None
 
@@ -286,6 +291,9 @@ class OrderResult(_Model):
     status: OrderStatus
     filled_qty: int = 0
     avg_fill_price: float | None = None  # net per 1x unit, includes modeled slippage
+    #: id of the position the broker opened/affected — the broker's
+    #: OWN naming, so callers never reconstruct it (audit D-080)
+    position_id: str | None = None
     commission: float = 0.0
     message: str = ""
 
@@ -379,6 +387,22 @@ class ProposedTrade(_Model):
         return self.legs[0].key.multiplier if self.legs else 100.0
 
 
+
+    @model_validator(mode="after")
+    def _reduced_ratios(self) -> "ProposedTrade":
+        """Leg ratios must be gcd-reduced: the broker re-bases units by gcd,
+        and an unreduced proposal silently re-scales unit_cost/unit_max_loss
+        relative to its records (audit D-200)."""
+        import math
+        from functools import reduce
+        qtys = [leg.qty for leg in self.legs]
+        if qtys and reduce(math.gcd, qtys) > 1:
+            raise ValueError(
+                f"ProposedTrade leg ratios {qtys} share a common factor; "
+                "reduce them and scale unit_cost/unit_max_loss accordingly")
+        return self
+
+
 class TradeRecord(_Model):
     """Closed-trade record emitted by the backtester / live reconciler."""
 
@@ -395,6 +419,10 @@ class TradeRecord(_Model):
     pnl: float  # dollars, after commissions/slippage
     exit_reason: str
     max_qty: int
+    #: structural worst case per unit (e.g. condor width - credit); None when
+    #: the proposing engine did not declare one. Lets the tail-event report
+    #: verify every realized loss against the defined-risk cap.
+    unit_max_loss: float | None = None
 
 
 # ---------------------------------------------------------------------------

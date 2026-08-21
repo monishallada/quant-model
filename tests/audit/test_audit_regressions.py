@@ -232,3 +232,59 @@ class TestVerifierCatches:
         assert value == pytest.approx(0.0, abs=0.01), (
             f"settled at {value} — the overnight gap was fabricated into "
             "settlement again")
+
+
+class TestDailySettlementReconciliation:
+    """The daily engine's _sweep_settled path had never executed under tests
+    (audit D-022/D-076). Drive a broker through expiry and reconcile the
+    record layer against the settlement telemetry the way the engine does."""
+
+    def _broker_with_expiring_short(self):
+        from catalyst.brokers.simulated import SimulatedBroker
+        from catalyst.core.config import CommissionsConfig, FillModelConfig
+        from catalyst.core.types import (OptionChain, OptionContract, OptionKey,
+                                         OptionRight, Order, OrderIntent,
+                                         OrderLeg, OrderStatus, Side)
+        from datetime import date, datetime
+        k_short = OptionKey(underlying="SPY", expiry=date(2024, 6, 7),
+                            right=OptionRight.PUT, strike=520.0)
+        k_long = OptionKey(underlying="SPY", expiry=date(2024, 6, 7),
+                           right=OptionRight.PUT, strike=515.0)
+        chain = OptionChain(
+            underlying="SPY", underlying_price=522.0,
+            timestamp=datetime(2024, 6, 3, 15, 45),
+            contracts=[OptionContract(key=k_short, bid=2.0, ask=2.2),
+                       OptionContract(key=k_long, bid=1.0, ask=1.1)])
+        b = SimulatedBroker(
+            fill_model=FillModelConfig(spread_fill_fraction=0.6,
+                                       slippage_pct_of_premium=0.0),
+            commissions=CommissionsConfig(alpaca_per_contract=0.0,
+                                          schwab_per_contract_per_leg=0.65,
+                                          active_profile="alpaca"),
+            starting_cash=100_000.0)
+        b.update_market({"SPY": chain}, datetime(2024, 6, 3, 15, 45))
+        r = b.place_order(Order(
+            legs=[OrderLeg(key=k_short, side=Side.SELL, qty=1),
+                  OrderLeg(key=k_long, side=Side.BUY, qty=1)],
+            intent=OrderIntent.OPEN, limit_price=-1.0, tag="t:x", max_loss=5.0))
+        assert r.status is OrderStatus.FILLED
+        return b, r
+
+    def test_itm_settlement_telemetry_reconciles_to_the_cent(self):
+        from datetime import datetime
+        b, r = self._broker_with_expiring_short()
+        cash_before = b.cash
+        # expiry+1, spot gapped to 512: short 520P is 8.00 ITM, long 515P 3.00
+        from catalyst.core.types import OptionChain
+        post = OptionChain(underlying="SPY", underlying_price=512.0,
+                           timestamp=datetime(2024, 6, 10, 15, 45), contracts=[])
+        b.update_market({"SPY": post}, datetime(2024, 6, 10, 15, 45))
+        assert not b.get_positions(), "expired structure settles away"
+        assert b.settlements, "settlement telemetry recorded"
+        pid, value, pnl = b.settlements[0]
+        # short put spread settles at -(8-3) = -5 per unit
+        assert value == pytest.approx(-5.0)
+        # cash moved by exactly value x qty x 100
+        assert b.cash - cash_before == pytest.approx(value * r.filled_qty * 100)
+        # collateral released
+        assert b.reserved_collateral == pytest.approx(0.0)

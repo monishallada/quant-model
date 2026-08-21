@@ -92,6 +92,14 @@ class NBBOCostModel(CostModel):
         self._commissions = commissions
 
     def leg_fill(self, contract: OptionContract, side: Side, contracts: int) -> Fill:
+        # A crossed book (bid > ask) is not a fillable market: pricing from its
+        # mid can land on the good side of the touch and either invent edge or
+        # crash the run via the NBBO assertion (audit D-043/D-044). Refuse it
+        # here — the single cost truth — so no caller can fill through it.
+        if contract.bid > contract.ask:
+            raise ValueError(
+                f"crossed quote bid={contract.bid} > ask={contract.ask} "
+                f"for {contract.key}: not fillable")
         mid = contract.mid
         frac = self._fill.spread_fill_fraction
         slip = self._fill.slippage_pct_of_premium
@@ -133,6 +141,10 @@ class ZeroCostModel(CostModel):
     name = "zero"
 
     def leg_fill(self, contract: OptionContract, side: Side, contracts: int) -> Fill:
+        if contract.bid > contract.ask:      # same refusal as the real model:
+            raise ValueError(               # the twin must differ ONLY in cost
+                f"crossed quote bid={contract.bid} > ask={contract.ask} "
+                f"for {contract.key}: not fillable")
         return Fill(price=max(contract.mid, 0.0), commission=0.0)
 
     def equity_fill(self, bid: float, ask: float, side: Side, shares: int) -> Fill:

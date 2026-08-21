@@ -4,3 +4,16 @@ environment: paper
 execution:
   commissions:
     active_profile: "alpaca"
+
+# Risk limits IDENTICAL to config/backtest.yaml — enforced by
+# tests/deployment/test_risk_parity.py (audit D-001: paper/live silently
+# inherited the loose research-era base values: 5% floor, 95% heat — 8x the
+# deployment the backtests validated). What you backtested is what trades.
+risk:
+  cash_floor_fraction: 0.40
+  max_deployed: 0.25
+  sizing_cost_buffer: 0.05
+  daily_loss_halt: -0.08
+  weekly_loss_halt: -0.15
+  max_correlated_positions: 3
+  correlation_threshold: 0.7
