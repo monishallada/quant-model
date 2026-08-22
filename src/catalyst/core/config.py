@@ -432,6 +432,27 @@ class ObservabilityConfig(_FrozenModel):
     kill_switch_flatten: bool
 
 
+class MosaicConfig(_FrozenModel):
+    """v16 unified intraday options algorithm — every gate sweepable."""
+
+    symbol: str = "SPY"
+    horizon_minutes: int = Field(default=60, gt=0, le=390)
+    vol_premium_min: float = Field(default=0.04, gt=0.0)
+    dislocation_z_min: float = Field(default=3.0, gt=0.0)
+    asym_min: float = Field(default=0.25, gt=0.0)
+    ev_min_frac_of_maxloss: float = Field(default=0.05, ge=0.0)
+    ev_min_dollars: float = Field(default=0.02, ge=0.0)
+    max_rel_spread: float = Field(default=0.12, gt=0.0)
+    max_hold_minutes: int = Field(default=90, gt=0)
+    stop_loss_pct: float = Field(default=-0.45, lt=0.0)
+    credit_stop_multiple: float = Field(default=1.8, gt=1.0)
+    per_trade_risk_fraction: float = Field(default=0.01, gt=0.0, le=0.10)
+    warmup_sessions: int = Field(default=60, ge=20)
+    use_stops: bool = True
+    vertical_width_strikes: int = Field(default=2, ge=1, le=6)
+    fv_g_min: float = Field(default=1.0, gt=0.0)
+
+
 class ShortVRPConfig(_FrozenModel):
     """v14 concentrated short-VRP (event iron condors)."""
 
@@ -465,6 +486,7 @@ class Config(_FrozenModel):
     index_vrp: IndexVRPConfig
     persymbol: PerSymbolConfig
     short_vrp: ShortVRPConfig
+    mosaic: MosaicConfig = MosaicConfig()
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig

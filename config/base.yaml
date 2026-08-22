@@ -492,3 +492,19 @@ short_vrp:                               # v14 concentrated short-VRP (iron cond
   use_stops: true                        # spec default; twin runs toggle via --set short_vrp.use_stops=false
   per_trade_risk_fraction: 0.02          # of equity, on structural max loss
   max_leg_spread_pct_of_mid: 0.08
+
+mosaic:                                  # v16 unified intraday options algorithm
+  symbol: "SPY"
+  horizon_minutes: 60
+  vol_premium_min: 0.04
+  dislocation_z_min: 3.0
+  asym_min: 0.25
+  ev_min_frac_of_maxloss: 0.05
+  ev_min_dollars: 0.02
+  max_rel_spread: 0.12
+  max_hold_minutes: 90
+  stop_loss_pct: -0.45
+  credit_stop_multiple: 1.8
+  per_trade_risk_fraction: 0.01
+  warmup_sessions: 60
+  use_stops: true

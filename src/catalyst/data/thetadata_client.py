@@ -85,13 +85,14 @@ class ThetaDataClient:
                 return pd.read_csv(io.StringIO(text))
             if resp.status_code == 472:
                 # "no data" from a terminal that may still be connecting —
-                # observed to flip to real data on retry (audit D-054).
-                if attempt < self._cfg.max_retries:
+                # observed to flip to real data on ONE retry (audit D-054).
+                # Persistent 472 is the legitimate no-data answer; a full
+                # backoff ladder here cost ~60s per empty contract-day and
+                # throttled minute-data backtests to a crawl (v16 pilot).
+                if attempt == 0:
                     last_error = ThetaDataError("HTTP 472")
-                    backoff = self._cfg.retry_backoff_seconds * (2**attempt)
-                    logger.warning("ThetaData %s -> 472; retrying in %.1fs",
-                                   path, backoff)
-                    time.sleep(backoff)
+                    logger.debug("ThetaData %s -> 472; one quick retry", path)
+                    time.sleep(self._cfg.retry_backoff_seconds)
                     continue
                 return pd.DataFrame()
             if resp.status_code == 478:

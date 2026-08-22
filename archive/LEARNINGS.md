@@ -455,3 +455,55 @@ Shared infrastructure — data layer, SimulatedBroker, RiskManager, exit manager
 backtester, metrics — was never archived. It is the validated platform every
 campaign plugs into, and it now carries credit-structure support, flat
 per-contract slippage, and the monthly headline metric.
+
+## v16 — MOSAIC (unified intraday options algorithm)
+
+The campaign asked for one elite intraday options algorithm and got the most
+complete measurement of the intraday options frontier in the repo's history.
+
+**What was built.** MOSAIC: minute bars → jump-robust RV forecast (bipower +
+diurnal curve) → empirical conditional return quantiles (ToD × vol × trend,
+expanding-window, point-in-time) → per-minute robust smile fit → payoff
+transform (sticky-strike AND sticky-delta = model-risk band) → EV gate with
+the full audited cost stack inside the strategy. Four candidate families
+(vol premium, dislocation, asymmetry, MP fair-value); the vol-premium family
+supplies essentially all trades.
+
+**The result that matters.** A real, reproducible GROSS edge — the largest
+intraday options edge in 16 campaigns — confirmed in every window it was
+shown, including two untouched ones: +1.23%/mo (2024), +0.91%/mo (2023
+out-of-year), +0.66%/mo (2025-Q1 holdout), zero-cost. Net of full Schwab
+friction the same windows read +0.01% / +0.35% / −1.25%/mo. The edge and the
+cost of collecting it are the same size (~1%/mo at ~17 trades/mo): net is
+statistically zero (2024 daily bootstrap: P(losing year)=47%).
+
+**Learnings.**
+1. Friction-efficiency levers compose and are worth ~3%/mo: wider verticals
+   (4-strike), longer holds (345 min), tighter EV gate (15% of max-loss),
+   2% risk. They took −2.94%/mo (naive) to +0.01%/mo (champion) at identical
+   gross edge. Trade LESS, hold LONGER, size BIGGER per decision.
+2. Commissions alone (0.94–1.07%/mo at $0.65/contract/leg) exceed the gross
+   edge at high frequency; mid-fills still lose (fill_00: −0.28%/mo). No
+   retail execution assumption rescues high-frequency variants.
+3. Per-trade EV magnitudes are noise (Spearman 0.06–0.08); the edge is
+   systematic. Tightening the EV gate past ~20% selects artifacts (ev30:
+   N=27, win 22%). Gates harvest the premium; they cannot rank it.
+4. Trade-resequencing MC leaves final equity invariant by construction —
+   only its drawdown distribution is informative. Use daily bootstrap for
+   final-equity distributions. (The report was corrected accordingly.)
+5. Exit anatomy of a short-premium harvester: time-based exits are the whole
+   P&L (+$348/+$561 avg); credit stops are the tail-cost engine (−$610 × 84
+   = −$51k ≈ all of the gross harvest). Stops-off was NOT better (−2.96%/mo
+   naive config): the stop is expensive but load-bearing.
+6. MP staleness (fair-value family) is negligible at 5-min decision cadence
+   — the ~54%/min convergence is gone before the next decision.
+7. QQQ > SPY for this machine at equal config (+1.02% vs +0.23% test):
+   coarser strike grid relative to spot = wider verticals per strike step =
+   better friction efficiency, same premium.
+
+**Verdict.** DO NOT DEPLOY at retail execution. Double-digit monthly returns:
+unsupported. The honest ceiling is the gross row; deployment economics would
+require demonstrated (not assumed) execution near mid AND zero commissions —
+i.e., not a retail account. The strategy remains in strategies/active/
+pending the operator's deployment decision (the campaign gate); full report:
+docs/v16_mosaic_report.pdf.
