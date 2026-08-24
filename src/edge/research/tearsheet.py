@@ -97,10 +97,10 @@ REQUIRED_LEDGER_COLUMNS: tuple[str, ...] = (
 #: The regime bucket series handed to the tearsheet must take values from
 #: this set; every tearsheet displays all four, zero-trade buckets included.
 REGIME_BUCKETS: tuple[str, ...] = (
-    "low_vol_trend",
-    "low_vol_chop",
-    "high_vol_trend",
-    "high_vol_chop",
+    "low_vol_trending",
+    "low_vol_chopping",
+    "high_vol_trending",
+    "high_vol_chopping",
 )
 
 #: Months of monthly returns below which the headline block appends its

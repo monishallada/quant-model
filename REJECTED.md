@@ -27,3 +27,28 @@ Signals that failed promotion, with the named gates they failed and the numbers 
 - failures: insufficient-oos-trades
 - numbers: n_trades=0
 
+## REJECTED: gex_pin
+
+- failures: insufficient-oos-trades, pbo-missing, regime-instability, coverage-limited-to-monthly-expiries
+- numbers: n_trades=12, expectancy_r=-0.05, ci_lo=-0.18, ci_hi=0.06, expiries_tested=26, expiries_available_daily=500
+
+## REJECTED: cot_extreme
+
+- failures: insufficient-oos-trades, structurally-trade-starved
+- numbers: oos_trades=0, is_trades_13_5_years=38, is_final_equity=89316
+
+## REJECTED: insider_cluster
+
+- failures: setup-never-occurs-on-this-universe
+- numbers: oos_trades=0, max_officer_buyers_21d_observed=1, required_officers=2, feature_rows_scanned=3455
+
+## REJECTED: flow_continuation
+
+- failures: expectancy-ci-excludes-zero-negative, insufficient-oos-trades, pbo-missing, regime-instability
+- numbers: n_trades=191, expectancy_r=-0.01, ci_lo=-0.02, ci_hi=0, gross_pnl=-416.64, spread_cost=-1760.71, hit_rate=0.361
+
+## REJECTED: flow_reversion
+
+- failures: expectancy-ci-includes-zero, insufficient-oos-trades, pbo-missing, regime-instability
+- numbers: n_trades=145, expectancy_r=-0.02, ci_lo=-0.04, ci_hi=0.01, gross_pnl=-773.29, spread_cost=-1343.8, hit_rate=0.428
+

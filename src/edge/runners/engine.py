@@ -425,6 +425,39 @@ class MarketContext:
             visible = visible[visible["symbol"] == symbol]
         return visible.reset_index(drop=True).copy()
 
+    def pit_latest(self, kind: str, symbol: str | None = None) -> pd.Series | None:
+        """The NEWEST row of ``kind`` visible at ``now``, or None if none is.
+
+        Same visibility rule as :meth:`pit` (``available_at <= now``), but
+        indexed: the frame is split per symbol once and bisected per call,
+        so minute-resolution kinds cost O(log n) rather than a full mask and
+        copy. Use this when a signal needs the current state of a feed
+        rather than its whole history.
+        """
+        frame = self._state.pit.get(kind)
+        if frame is None:
+            raise KeyError(
+                f"pit kind {kind!r} was not preloaded; add it to EngineParams.pit_kinds "
+                f"(loaded: {sorted(self._state.pit)})"
+            )
+        cache_key = (kind, symbol)
+        entry = self._state.pit_index.get(cache_key)
+        if entry is None:
+            sub = frame
+            if symbol is not None and "symbol" in frame.columns:
+                sub = frame[frame["symbol"] == symbol]
+            sub = sub.sort_values("available_at", kind="stable").reset_index(drop=True)
+            values = pd.to_datetime(sub["available_at"]).to_numpy(dtype="datetime64[ns]")
+            entry = (values, sub)
+            self._state.pit_index[cache_key] = entry
+        values, sub = entry
+        if len(sub) == 0:
+            return None
+        cut = int(values.searchsorted(pd.Timestamp(self.now).to_datetime64(), side="right"))
+        if cut == 0:
+            return None
+        return sub.iloc[cut - 1]
+
     def options_pit(self, kind: str, symbol: str) -> pd.DataFrame:
         """Per-expiry options rows of ``kind`` with ``available_at <= now``.
 
@@ -517,6 +550,13 @@ class _RunState:
     bar_ts: dict[str, list[datetime]] = field(default_factory=dict)
     quotes: QuoteSource | None = None
     pit: dict[str, pd.DataFrame] = field(default_factory=dict)
+    #: (kind, symbol|None) -> (available_at as int64 ns, per-symbol frame),
+    #: built lazily so ``pit_latest`` is O(log n) instead of masking the
+    #: whole frame on every bar. Minute-resolution kinds make the difference
+    #: between a run that finishes and one that does not.
+    pit_index: dict[tuple[str, str | None], tuple[Any, pd.DataFrame]] = field(
+        default_factory=dict
+    )
     #: (kind, per-expiry symbol) -> the frame loaded for the current session.
     options_pit: dict[tuple[str, str], _OptionsPitEntry] = field(default_factory=dict)
     seen: dict[str, list[BarEvent]] = field(default_factory=dict)

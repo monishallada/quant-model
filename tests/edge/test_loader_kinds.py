@@ -56,6 +56,7 @@ VALUE_COLUMNS = {
     "cot": "lev_net_oi",
     "insider": "net_insider_dollars_21d",
     "earnings": "days_to_next_earnings",
+    "micro": "imbalance",
 }
 
 #: The KEEP row's available_at per kind — each mirrors that kind's real
@@ -67,6 +68,9 @@ KEEP_AVAILABLE = {
     "cot": pd.Timestamp(2026, 2, 20, 16, 0, tz=ET),  # Friday 16:00
     "insider": pd.Timestamp(2026, 2, 17, 20, 35, tz=ET),  # acceptance + 5min
     "earnings": pd.Timestamp(2026, 2, 17, 0, 0, tz=ET),  # asof 00:00 ET
+    # the minute's own CLOSE: features are computed from prints fully
+    # observed by that instant, and consumed one bar later
+    "micro": pd.Timestamp(2026, 2, 17, 15, 59, tz=ET),
 }
 
 #: The LATE-PUBLICATION row's available_at per kind: asof Fri 2026-02-20
@@ -80,6 +84,7 @@ LATE_AVAILABLE = {
     "cot": pd.Timestamp(2026, 2, 27, 16, 0, tz=ET),
     "insider": pd.Timestamp(2026, 2, 23, 10, 10, tz=ET),
     "earnings": pd.Timestamp(2026, 2, 23, 18, 0, tz=ET),
+    "micro": pd.Timestamp(2026, 2, 23, 9, 31, tz=ET),
 }
 
 SYMBOL = "AAPL"

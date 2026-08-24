@@ -377,15 +377,15 @@ def test_regime_breakdown_buckets_and_positive_count() -> None:
 
 
 def test_regime_breakdown_empty_bucket_and_negative_bucket() -> None:
-    ledger = _ledger(n=200)  # ends 2025-07-20: high_vol_chop never occurs
-    # Make every high_vol_trend trade a loser: its bucket goes negative.
+    ledger = _ledger(n=200)  # ends 2025-07-20: high_vol_chopping never occurs
+    # Make every high_vol_trending trade a loser: its bucket goes negative.
     in_q3 = ledger["entry_ts"] >= pd.Timestamp("2025-07-01", tz=ET)
     ledger.loc[in_q3, "r_multiple"] = -0.5
     stats, positive = compute_regime_breakdown(ledger, _regime())
     by_bucket = {s.bucket: s for s in stats}
-    assert by_bucket["high_vol_chop"].n == 0
-    assert by_bucket["high_vol_chop"].expectancy_r is None
-    assert by_bucket["high_vol_trend"].expectancy_r == pytest.approx(-0.5)
+    assert by_bucket["high_vol_chopping"].n == 0
+    assert by_bucket["high_vol_chopping"].expectancy_r is None
+    assert by_bucket["high_vol_trending"].expectancy_r == pytest.approx(-0.5)
     assert positive == 2
 
 
@@ -397,7 +397,7 @@ def test_regime_breakdown_rejects_bad_inputs() -> None:
     with pytest.raises(ValueError, match="unknown regime buckets"):
         compute_regime_breakdown(ledger, bad_label)
     late_start = pd.Series(
-        ["low_vol_trend"],
+        ["low_vol_trending"],
         index=pd.DatetimeIndex([pd.Timestamp("2025-06-01", tz=ET)]),
     )
     with pytest.raises(ValueError, match="before the first regime observation"):

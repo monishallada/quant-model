@@ -149,3 +149,158 @@ CFTC archives before wave 2. gex_pin needs an engine extension first;
 that is foundation work, to be attacked as its own task, referee-reviewed.
 Nothing gets promoted; nothing gets tuned; the thresholds stay as written
 in their hypotheses.
+
+## 2026-08-22 (session continuation) — Closing the wave-1 gaps
+
+Three wave-1 hypotheses were never actually tested (two blocked on missing
+archives, one on an engine capability gap). Everything below is plumbing to
+make them testable — no thresholds touched, no results yet.
+
+**Archives warmed.** CFTC TFF 2010–2026 (17 yearly zips; the 2010–2012 files
+use a legacy `Report_Date_as_MM_DD_YYYY` header, now accepted as an alias —
+found by real data, not by guessing) and EDGAR Form 4 for the eight
+single names (5,952 filings, 34,179 transaction rows, 2019-01→2026-02-20,
+zero parse failures). The Form 4 backfill exposed a real parser bug: the
+fixed-width index parser derived column bounds from header labels, but the
+data columns are padded wider, truncating dates to `2019-01`. Fixed with a
+right-anchored row regex plus a drift guard that raises rather than silently
+shrinking an index. Caveat recorded: filings carry the issuer symbol AS
+FILED, so Meta's pre-rename rows say `FB` and most Alphabet rows say `GOOG`.
+
+**Engine extension.** Per-expiry point-in-time routing (`options_pit`), the
+gap that blocked gex_pin: per-(symbol, session) lazy loads through the
+gateway, visibility enforced engine-side, and day-D open interest provably
+invisible on day D (it is stamped next-business-day 09:00 ET by the bridge).
+
+**Two platform holes found and fixed while re-running.**
+1. The wave-1 run harness lived only in a subagent's scratch directory and
+   was gone — the campaign was not reproducible from the repo. It is now
+   `src/edge/runners/campaign.py`: RunSpec → trial-first `run_signal` →
+   engine → persisted ledger/equity/summary → tearsheet, with the synthetic
+   quote source (bar close ± half-spread, fill at touch) as a named,
+   recorded modelling assumption rather than an invisible one.
+2. `EdgeDataLoader` had no constructor serving market data AND feeds
+   together — `with_feeds()` refuses `bars`. Added `ResearchBackend` +
+   `with_research()`: bars/quotes/options-EOD via the cache-only
+   CatalystBridge, feed kinds via FeedsBackend, one lockbox wall over both.
+   (First attempt at this patch inserted a class into the middle of another
+   class body and broke 105 tests; reverted and redone. Suite green: 609
+   edge tests.)
+
+Two failed trials (19, 20) are recorded in TRIALS.jsonl from the harness bug
+before the loader fix. They stand — the registry records attempts, and a
+higher trial count only raises the deflated-Sharpe bar. Reruns now executing.
+
+## 2026-08-23 — Wave 1b: the three untested hypotheses, honestly tested
+
+All three are now runnable. None is promotable, but only ONE of the three is
+a statement about markets — the other two are statements about coverage.
+
+**A bug of mine corrupted the first attempt, and the correction matters.**
+`campaign.py` RECORDED execution overrides it never APPLIED, so the reruns
+charged option-grade costs on equity trades: 2% of the *share price* in
+slippage per side, plus per-share commissions. cot_extreme's in-sample
+result read $16,388 (of which $72,772 was phantom slippage); corrected, it
+is **$89,316** — a modest ~11% loss over 13.5 years, not a wipeout. gex_pin's
+OOS read −39%; corrected, it is −1.2%. Wave-1 numbers were unaffected
+(their harness applied the overrides; ledgers show slippage $0). Fixed so it
+cannot recur: the recorded config is now DERIVED from the applied config
+object, with regression tests pinning record==apply. The lesson is the
+project's own thesis turned on itself — a config that claims one thing while
+the engine does another is exactly the failure this platform exists to catch,
+and it caught it in my own code.
+
+**cot_extreme — INSUFFICIENT-DATA (structurally trade-starved).**
+38 signals in 13.5 years IS; **0 in the 26-month OOS window**. A 2-sigma
+leveraged-fund extreme over a 104-week window is rare by construction, so
+this hypothesis cannot reach the 300-trade promotion bar in any realistic
+sample. Not rejected on edge — unfalsifiable at this frequency.
+
+**insider_cluster — UNTESTABLE ON THIS UNIVERSE (a data-shape finding).**
+0 emissions across both spans, and the reason is structural, not plumbing:
+across 3,455 feature rows and 7 years, `officer_buyers_21d` **never once
+reaches 2** (max = 1; only 8 rows carry any officer buy at all). Mega-cap
+officers receive awards and sell; they do not buy on the open market. The
+mechanism may well exist — it just does not exist HERE. Testing it needs a
+small/mid-cap universe and a much broader Form 4 backfill.
+
+**gex_pin — COVERAGE-LIMITED PROBE, not a verdict on GEX.**
+OOS: 12 trades, geometric monthly −0.0%, expectancy −0.05R,
+95% CI [−0.18R, +0.06R] — includes zero, hit rate 50%, payoff 0.47. So: no
+measurable pinning effect either way. But every trade landed on a MONTHLY
+expiry (2024-03-15, 2024-07-19, 2024-11-15, 2025-01-17, ...) because the EOD
+greeks cache holds only monthly expiries, while SPY/QQQ expire daily. The
+hypothesis was therefore probed on roughly 4% of its opportunity set. The
+v16 question ("is OI-only dealer gamma alpha?") remains open; answering it
+needs a greeks_eod warm for daily expiries.
+
+**Two more platform defects found and fixed.** (1) The regime classifier and
+the tearsheet had drifted into two spellings of the same four buckets
+(`high_vol_trending` vs `high_vol_trend`); wave-1's harness had been silently
+translating, so the drift only surfaced once the harness was rebuilt in-repo.
+One vocabulary now, producer's spelling wins. (2) The tearsheet's regime join
+needs a tz-aware ET index; the campaign runner now builds it, so a trade at
+any hour picks up its own session's bucket.
+
+**Microstructure layer built** (the family the diagnosis actually pointed
+at, and the only one wave 1 could not see). 568 sessions of SPY+QQQ trade
+prints staged (3.34GB, zero skips, 2025-01-02..2026-02-20); tick-rule
+signing, size-weighted trade-sign imbalance, VPIN on an EXACT volume clock
+(boundary prints split proportionally, so buckets hold identical volume),
+and trade-intensity z. 17 tests. Two of my own tests failed first and both
+were the TEST's error, not the code's: minutes are left-open/right-closed
+(a print exactly on 09:30:00.000 belongs to the minute ENDING 09:30), and a
+truncated tape's last minute is legitimately incomplete. Corrected the
+tests, kept the behaviour. Per-minute frames now precomputing into a compact
+derived cache.
+
+**Standing count: 7 hypotheses tested, 0 promoted, 0 tuned.**
+
+## 2026-08-23 (later) — Wave 2: the microstructure family. Both sides of the pair fail.
+
+The first hypotheses in this project that read WHO is transacting rather than
+what price did — and the first designed as a matched pair, so that the test
+could distinguish "wrong direction" from "no information".
+
+**Design.** Same observation (a large one-sided trade imbalance), opposite
+predictions, one discriminator. High VPIN => informed metaorder being worked
+in slices => FOLLOW (Kyle; square-root impact law). Low VPIN => uninformed
+demand for immediacy => the inventory concession REVERTS (Grossman-Miller).
+Unit-tested property: across the whole VPIN range exactly one of the pair
+fires — never both, never neither — and they take opposite sides on the same
+imbalance. If the discriminator carried information, one should have worked
+where the other failed.
+
+**Result: neither worked, and the discriminator carried nothing.**
+
+- **flow_continuation** — OOS geometric monthly **-0.3%**, 95% CI
+  [-0.5%, -0.1%], 8 months, **N=191**. Expectancy -0.01R, CI [-0.02R, -0.00R]
+  — excludes zero on the NEGATIVE side. Hit rate 36.1%, payoff 1.17.
+- **flow_reversion** — OOS geometric monthly **-0.3%**, 95% CI [-0.5%, -0.0%],
+  8 months, **N=145**. Expectancy -0.02R, CI [-0.04R, +0.01R] — includes zero.
+  Hit rate 42.8%, payoff 0.89.
+
+Both REJECT. Neither reaches the 300-trade bar, and 8 months is far short of
+the 46 needed to distinguish a Sharpe-1.0 strategy from zero — so the honest
+statement is "no measurable edge", not "proven absent".
+
+**The cost attribution is the finding, again, and it is now unambiguous.**
+flow_continuation: gross **-$417**, spread **-$1,761**, net -$2,177.
+flow_reversion: gross **-$773**, spread **-$1,344**, net -$2,117.
+Gross P&L is approximately ZERO in both directions — the tape's information,
+if any, is smaller than one half-spread at a 30-minute horizon. This is the
+same physics the diagnosis found in the options book (friction 99.1% of
+gross) reproduced in a completely different data family, by signals built on
+a completely different mechanism. Four independent families now agree.
+
+**What this does and does not settle.** It does NOT refute market
+microstructure theory: metaorder continuation and immediacy concession are
+well-evidenced effects, and both plausibly live at horizons (seconds) and
+in venues (the actual book) this setup cannot reach with minute bars, trade
+prints only, and no quote data. What it settles is narrower and more useful:
+**at a 30-minute horizon on SPY/QQQ, trade-tape imbalance and VPIN do not
+produce a signal large enough to pay a 1bp half-spread.** Testing the faster
+horizon would need L1 quote data (OFI, queue imbalance) and a sub-minute
+engine — a different platform, not a parameter change.
+
+**Standing count: 9 hypotheses tested, 0 promoted, 0 tuned.**

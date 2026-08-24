@@ -101,7 +101,7 @@ DataKind = Literal[
 #: Kinds whose frames follow the point-in-time convention and receive the
 #: row-level (asof_date AND available_at) lockbox clamp when locked.
 POINT_IN_TIME_KINDS: Final[frozenset[str]] = frozenset(
-    {"short_ratio", "vol_indices", "rates", "cot", "insider", "earnings"}
+    {"short_ratio", "vol_indices", "rates", "cot", "insider", "earnings", "micro"}
 )
 
 #: Columns every point-in-time frame must carry.
@@ -110,7 +110,7 @@ PIT_COLUMNS: Final[tuple[str, str]] = ("asof_date", "available_at")
 #: Point-in-time kinds keyed per symbol; the rest are market-wide and the
 #: ``symbol`` argument is ignored for them (pass a placeholder like "MKT").
 PER_SYMBOL_PIT_KINDS: Final[frozenset[str]] = frozenset(
-    {"short_ratio", "insider", "earnings"}
+    {"short_ratio", "insider", "earnings", "micro"}
 )
 
 #: Pass as ``symbol`` for a per-symbol point-in-time kind to request the
@@ -246,6 +246,8 @@ class FeedsBackend:
             return self._insider(symbol, start, end)
         if kind == "earnings":
             return self._earnings(symbol, start, end)
+        if kind == "micro":
+            return self._micro(symbol, start, end)
         raise ValueError(
             f"FeedsBackend serves only the point-in-time kinds "
             f"{sorted(POINT_IN_TIME_KINDS)}, got {kind!r}"
@@ -255,6 +257,37 @@ class FeedsBackend:
 
     def _edge_cache(self, source: str) -> Path:
         return self._root / "data_cache" / "edge" / source
+
+    def _micro(self, symbol: str, start: date, end: date) -> pd.DataFrame:
+        """Per-minute trade-tape microstructure from the derived cache.
+
+        The cache is precomputed per (symbol, session) from staged SIP trade
+        prints; each row's ``available_at`` is its own minute CLOSE, because
+        the features are computed from prints fully observed by that instant.
+        Consumers receive it under bar-visibility semantics — a minute-t row
+        is actionable on the t+1 decision, exactly like a BarEvent.
+        """
+        root = self._edge_cache("micro")
+        if not root.exists():
+            return pd.DataFrame(columns=["symbol", "ts", "asof_date", "available_at"])
+        symbols = (
+            [d.name.split("=", 1)[1] for d in sorted(root.glob("symbol=*"))]
+            if symbol == ALL_SYMBOLS
+            else [symbol]
+        )
+        frames = []
+        for sym in symbols:
+            for path in sorted((root / f"symbol={sym}").glob("date=*.parquet")):
+                day = date.fromisoformat(path.name.split("=", 1)[1].removesuffix(".parquet"))
+                if day < start or day > end:
+                    continue
+                frames.append(pd.read_parquet(path))
+        if not frames:
+            return pd.DataFrame(columns=["symbol", "ts", "asof_date", "available_at"])
+        out = pd.concat(frames, ignore_index=True)
+        out["available_at"] = pd.to_datetime(out["ts"])
+        out["asof_date"] = out["available_at"].dt.tz_convert(MARKET_TZ).dt.normalize().dt.tz_localize(None)
+        return out.sort_values("available_at", kind="stable").reset_index(drop=True)
 
     def _short_ratio(self, symbol: str, start: date, end: date) -> pd.DataFrame:
         from edge.data.feeds.finra_short import FinraShortDaily
@@ -311,6 +344,36 @@ class FeedsBackend:
         return feed.features(pd.Timestamp(start), pd.Timestamp(end), symbols=symbols)
 
 
+class ResearchBackend:
+    """Routes every research kind to the backend that owns it.
+
+    Market data (``bars``/``quotes`` and the per-expiry options EOD kinds)
+    goes to the CatalystBridge over the catalyst parquet archive; the slow
+    point-in-time feed kinds go to :class:`FeedsBackend`. Backend machinery:
+    research code never names it — it gets a loader over this backend from
+    :meth:`EdgeDataLoader.with_research`.
+
+    The bridge is CACHE-ONLY by construction here: a research replay must
+    never trigger a ThetaData terminal fetch as a side effect.
+    """
+
+    def __init__(self, repo_root: str | Path | None = None) -> None:
+        from edge.data.backends import build_catalyst_bridge
+
+        self._feeds = FeedsBackend(repo_root=repo_root)
+        self._bridge = build_catalyst_bridge(
+            repo_root=str(repo_root) if repo_root is not None else None,
+            allow_fetch=False,
+            missing_ok=True,
+        )
+
+    def fetch(self, symbol: str, start: date, end: date, kind: DataKind) -> pd.DataFrame:
+        """Feed kinds to the feeds backend; everything else to the bridge."""
+        if kind in POINT_IN_TIME_KINDS:
+            return self._feeds.fetch(symbol, start, end, kind)
+        return self._bridge.fetch(symbol, start, end, kind)
+
+
 class EdgeDataLoader:
     """The sole data gateway; locked by default, unlocked only by content.
 
@@ -343,6 +406,28 @@ class EdgeDataLoader:
         self._key = key
         self._repo_root = repo_root
         self._wall = LockboxWall(config_path=config_path, repo_root=repo_root)
+
+    @classmethod
+    def with_research(
+        cls,
+        repo_root: str | Path | None = None,
+        *,
+        key: object | None = None,
+        config_path: str | Path | None = None,
+    ) -> EdgeDataLoader:
+        """Sanctioned research-side constructor for FULL campaign runs.
+
+        Serves the market-data kinds (``bars``, ``quotes``, and the
+        per-expiry options EOD kinds) alongside the point-in-time feeds,
+        through one lockbox-walled gateway. The options bridge behind it is
+        cache-only: a replay can never trigger a terminal fetch.
+        """
+        return cls(
+            ResearchBackend(repo_root=repo_root),
+            key=key,
+            config_path=config_path,
+            repo_root=repo_root,
+        )
 
     @classmethod
     def with_feeds(
