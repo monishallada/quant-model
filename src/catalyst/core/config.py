@@ -432,6 +432,24 @@ class ObservabilityConfig(_FrozenModel):
     kill_switch_flatten: bool
 
 
+class OrbOptionsConfig(_FrozenModel):
+    """v17 ORB-options gates. Every field is a pre-registered economic
+    choice; sweeping one is a separate trial, never a tuning loop."""
+
+    symbol: str = "QQQ"
+    range_minutes: int = Field(default=15, gt=0, le=120)
+    max_range_atr_frac: float = Field(default=0.55, gt=0.0)
+    breakout_atr_buffer: float = Field(default=0.05, ge=0.0)
+    min_rel_volume: float = Field(default=1.30, gt=0.0)
+    target_delta: float = Field(default=0.45, gt=0.0, lt=1.0)
+    max_rel_spread: float = Field(default=0.06, gt=0.0)
+    min_premium: float = Field(default=0.20, gt=0.0)
+    min_expected_edge_ratio: float = Field(default=0.25, gt=0.0)
+    stop_loss_pct: float = Field(default=-0.50, lt=0.0)
+    max_hold_minutes: int = Field(default=120, gt=0)
+    per_trade_risk_fraction: float = Field(default=0.02, gt=0.0, le=0.1)
+
+
 class MosaicConfig(_FrozenModel):
     """v16 unified intraday options algorithm — every gate sweepable."""
 
@@ -487,6 +505,7 @@ class Config(_FrozenModel):
     persymbol: PerSymbolConfig
     short_vrp: ShortVRPConfig
     mosaic: MosaicConfig = MosaicConfig()
+    orb_options: OrbOptionsConfig = OrbOptionsConfig()
     risk: RiskConfig
     execution: ExecutionConfig
     backtest: BacktestConfig

@@ -304,3 +304,20 @@ horizon would need L1 quote data (OFI, queue imbalance) and a sub-minute
 engine — a different platform, not a parameter change.
 
 **Standing count: 9 hypotheses tested, 0 promoted, 0 tuned.**
+
+## 2026-08-24 — ORB-options: pre-declared exit-policy variants
+
+Baseline result is in (see below). BEFORE running any variant, the four to be
+tested are declared here, and ALL of them will be reported whatever they show:
+
+  V1 stops_off    stop_loss_pct -0.95  (is the premium stop load-bearing?)
+  V2 tight_stop   stop_loss_pct -0.30
+  V3 long_hold    max_hold_minutes 240
+  V4 short_hold   max_hold_minutes 60
+
+Rationale: the baseline's exit anatomy shows the stop losing $55,494 over 50
+trades against max-hold winning $45,496 over 42 — so the stop is where the
+money goes, and whether it is protection or self-harm is a real question.
+Selecting the best of these on the SAME data would be overfitting; the
+comparison is reported as a sensitivity band, and any winner would need its
+own out-of-sample confirmation before meaning anything.

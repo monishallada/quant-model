@@ -508,3 +508,17 @@ mosaic:                                  # v16 unified intraday options algorith
   per_trade_risk_fraction: 0.01
   warmup_sessions: 60
   use_stops: true
+
+orb_options:                             # v17 ORB expressed in long options
+  symbol: "QQQ"
+  range_minutes: 15
+  max_range_atr_frac: 0.55
+  breakout_atr_buffer: 0.05
+  min_rel_volume: 1.30
+  target_delta: 0.45
+  max_rel_spread: 0.06
+  min_premium: 0.20
+  min_expected_edge_ratio: 0.25
+  stop_loss_pct: -0.50
+  max_hold_minutes: 120
+  per_trade_risk_fraction: 0.02
